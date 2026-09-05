@@ -1,0 +1,70 @@
+name: MUSITU Phase J runtime proof
+
+on:
+  push:
+    branches:
+      - musitu-continuum-phase-j-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phase-j-runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout execution branch
+        uses: actions/checkout@v4
+
+      - name: Restore exact MUSITU Phase J source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d musitu-phase-j-source.tar.gz.b64 > musitu-phase-j-source.tar.gz
+          sha256sum -c MUSITU_PHASE_J_SOURCE_SHA256.txt
+          tar -xzf musitu-phase-j-source.tar.gz
+          sha256sum -c MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
+          chmod +x scripts/phase-j-runtime-proof.sh
+
+      - name: Install Go 1.27.1
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Acquire pinned Go module graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd airgrid/transport/local-libp2p
+          go mod tidy
+          go version
+          test -s go.sum
+
+      - name: Verify Docker substrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker info
+
+      - name: Run MUSITU Phase J runtime proof
+        env:
+          MUSITU_PHASE_J_EVIDENCE_DIR: ${{ runner.temp }}/musitu-phase-j-runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/phase-j-runtime-proof.sh
+          cp airgrid/transport/local-libp2p/go.sum "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.sum"
+          sha256sum airgrid/transport/local-libp2p/go.sum > "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.sum.sha256"
+          cp MUSITU_PHASE_J_SOURCE_SHA256.txt "${MUSITU_PHASE_J_EVIDENCE_DIR}/source-archive-sha256.txt"
+          cp MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt "${MUSITU_PHASE_J_EVIDENCE_DIR}/source-files-sha256.txt"
+          printf '%s\n' "${GITHUB_SHA}" > "${MUSITU_PHASE_J_EVIDENCE_DIR}/github-execution-commit.txt"
+
+      - name: Upload MUSITU Phase J evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musitu-phase-j-runtime-${{ github.run_id }}
+          path: ${{ runner.temp }}/musitu-phase-j-runtime
+          if-no-files-found: warn
