@@ -28,6 +28,15 @@ jobs:
           sha256sum -c MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
           chmod +x scripts/phase-j-runtime-proof.sh
 
+      - name: Upload current locked source snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-j-source-snapshot-${{ github.run_id }}
+          path: |
+            musitu-phase-j-source.tar.gz
+            MUSITU_PHASE_J_SOURCE_SHA256.txt
+            MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
+
       - name: Verify authoritative first-run Go lock
         shell: bash
         run: |
