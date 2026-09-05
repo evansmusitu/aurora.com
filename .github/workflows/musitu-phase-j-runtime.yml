@@ -1,4 +1,4 @@
-name: MUSITU Phase J runtime proof
+name: MUSITU Phase J locked runtime proof
 
 on:
   push:
@@ -14,9 +14,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout execution branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - name: Restore exact MUSITU Phase J source
+      - name: Restore exact locked MUSITU Phase J source
         shell: bash
         run: |
           set -euo pipefail
@@ -25,21 +25,24 @@ jobs:
           tar -xzf musitu-phase-j-source.tar.gz
           sha256sum -c MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
           chmod +x scripts/phase-j-runtime-proof.sh
+          test -s airgrid/transport/local-libp2p/go.sum
 
       - name: Install Go 1.27.1
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: '1.27.1'
           cache: false
 
-      - name: Acquire pinned Go module graph
+      - name: Acquire locked Go module graph
         shell: bash
         run: |
           set -euo pipefail
           cd airgrid/transport/local-libp2p
-          go mod tidy
+          go mod download
+          go mod verify
           go version
-          test -s go.sum
+          printf '%s  %s\n' '12e080472270323abd1e652e26963f374416fc0b1f6874b5003dad4c1096066c' 'go.mod' | sha256sum -c -
+          printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' 'go.sum' | sha256sum -c -
 
       - name: Verify Docker substrate
         shell: bash
@@ -48,7 +51,7 @@ jobs:
           docker version
           docker info
 
-      - name: Run MUSITU Phase J runtime proof
+      - name: Run MUSITU Phase J locked runtime proof
         env:
           MUSITU_PHASE_J_EVIDENCE_DIR: ${{ runner.temp }}/musitu-phase-j-runtime
         shell: bash
@@ -60,11 +63,12 @@ jobs:
           cp MUSITU_PHASE_J_SOURCE_SHA256.txt "${MUSITU_PHASE_J_EVIDENCE_DIR}/source-archive-sha256.txt"
           cp MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt "${MUSITU_PHASE_J_EVIDENCE_DIR}/source-files-sha256.txt"
           printf '%s\n' "${GITHUB_SHA}" > "${MUSITU_PHASE_J_EVIDENCE_DIR}/github-execution-commit.txt"
+          docker inspect python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 > "${MUSITU_PHASE_J_EVIDENCE_DIR}/python-base-image-inspect.json"
 
       - name: Upload MUSITU Phase J evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: musitu-phase-j-runtime-${{ github.run_id }}
+          name: musitu-phase-j-locked-runtime-${{ github.run_id }}
           path: ${{ runner.temp }}/musitu-phase-j-runtime
           if-no-files-found: warn
