@@ -17,7 +17,7 @@ jobs:
       - name: Checkout execution branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - name: Restore verified MUSITU Phase J source
+      - name: Restore exact locked MUSITU Phase J source
         shell: bash
         run: |
           set -euo pipefail
@@ -28,19 +28,11 @@ jobs:
           sha256sum -c MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
           chmod +x scripts/phase-j-runtime-proof.sh
 
-      - name: Upload current locked source snapshot
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: musitu-phase-j-source-snapshot-${{ github.run_id }}
-          path: |
-            musitu-phase-j-source.tar.gz
-            MUSITU_PHASE_J_SOURCE_SHA256.txt
-            MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
-
-      - name: Verify authoritative first-run Go lock
+      - name: Verify authoritative module locks
         shell: bash
         run: |
           set -euo pipefail
+          printf '%s  %s\n' '81a36799987a75c0101cdea29f6ae3752d12730425e5f12e1a6536226968b4da' 'airgrid/transport/local-libp2p/go.mod' | sha256sum -c -
           printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' 'airgrid/transport/local-libp2p/go.sum' | sha256sum -c -
           grep -F 'github.com/libp2p/go-libp2p v0.49.0' airgrid/transport/local-libp2p/go.mod
 
@@ -55,9 +47,11 @@ jobs:
         run: |
           set -euo pipefail
           cd airgrid/transport/local-libp2p
+          go version
           go mod download
           go mod verify
-          go version
+          go mod tidy
+          printf '%s  %s\n' '81a36799987a75c0101cdea29f6ae3752d12730425e5f12e1a6536226968b4da' 'go.mod' | sha256sum -c -
           printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' 'go.sum' | sha256sum -c -
 
       - name: Verify Docker substrate and pinned base image
@@ -85,7 +79,7 @@ jobs:
           cp musitu-phase-j-source.tar.gz "${MUSITU_PHASE_J_EVIDENCE_DIR}/musitu-phase-j-source.tar.gz"
           printf '%s\n' "${GITHUB_SHA}" > "${MUSITU_PHASE_J_EVIDENCE_DIR}/github-execution-commit.txt"
           printf '%s\n' '33961069437' > "${MUSITU_PHASE_J_EVIDENCE_DIR}/authoritative-go-sum-run.txt"
-          docker inspect python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 > "${MUSITU_PHASE_J_EVIDENCE_DIR}/python-base-image-inspect.json"
+          docker image inspect python@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 > "${MUSITU_PHASE_J_EVIDENCE_DIR}/python-base-image-inspect.json"
 
       - name: Upload MUSITU Phase J final evidence
         if: always()

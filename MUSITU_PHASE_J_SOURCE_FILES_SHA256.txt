@@ -1,4 +1,4 @@
-12e080472270323abd1e652e26963f374416fc0b1f6874b5003dad4c1096066c  airgrid/transport/local-libp2p/go.mod
+81a36799987a75c0101cdea29f6ae3752d12730425e5f12e1a6536226968b4da  airgrid/transport/local-libp2p/go.mod
 883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91  airgrid/transport/local-libp2p/go.sum
 50e3e1a6a78d3096f4c68697c737040ce92be6a1fed579d785ff2f018dafdf0c  airgrid/transport/local-libp2p/transport.go
 72e5c1aa788edb9243a7b1272a71fa6082da2e5d0f1fe8fb24918e28e1b80eb3  airgrid/transport/local-libp2p/transport_test.go
