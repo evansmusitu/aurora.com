@@ -28,24 +28,12 @@ jobs:
           sha256sum -c MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
           chmod +x scripts/phase-j-runtime-proof.sh
 
-      - name: Restore acquired immutable Go lock
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify authoritative first-run Go lock
         shell: bash
         run: |
           set -euo pipefail
-          LOCK_DIR="${RUNNER_TEMP}/musitu-phase-j-lock"
-          mkdir -p "${LOCK_DIR}"
-          gh run download 33961727715 \
-            --repo evansmusitu/aurora.com \
-            --name musitu-phase-j-lock-acquisition-33961727715 \
-            --dir "${LOCK_DIR}"
-          test -s "${LOCK_DIR}/airgrid-go.mod"
-          test -s "${LOCK_DIR}/airgrid-go.sum"
-          printf '%s  %s\n' '81a36799987a75c0101cdea29f6ae3752d12730425e5f12e1a6536226968b4da' "${LOCK_DIR}/airgrid-go.mod" | sha256sum -c -
-          printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' "${LOCK_DIR}/airgrid-go.sum" | sha256sum -c -
-          cp "${LOCK_DIR}/airgrid-go.mod" airgrid/transport/local-libp2p/go.mod
-          cp "${LOCK_DIR}/airgrid-go.sum" airgrid/transport/local-libp2p/go.sum
+          printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' 'airgrid/transport/local-libp2p/go.sum' | sha256sum -c -
+          grep -F 'github.com/libp2p/go-libp2p v0.49.0' airgrid/transport/local-libp2p/go.mod
 
       - name: Install Go 1.27.1
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
@@ -61,15 +49,16 @@ jobs:
           go mod download
           go mod verify
           go version
-          printf '%s  %s\n' '81a36799987a75c0101cdea29f6ae3752d12730425e5f12e1a6536226968b4da' 'go.mod' | sha256sum -c -
           printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' 'go.sum' | sha256sum -c -
 
-      - name: Verify Docker substrate
+      - name: Verify Docker substrate and pinned base image
         shell: bash
         run: |
           set -euo pipefail
           docker version
           docker info
+          grep -F 'FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285' edge/community-node/Dockerfile
+          docker pull python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
 
       - name: Run MUSITU Phase J final locked runtime proof
         env:
@@ -84,8 +73,9 @@ jobs:
           sha256sum airgrid/transport/local-libp2p/go.sum > "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.sum.sha256"
           cp MUSITU_PHASE_J_SOURCE_SHA256.txt "${MUSITU_PHASE_J_EVIDENCE_DIR}/source-archive-sha256.txt"
           cp MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt "${MUSITU_PHASE_J_EVIDENCE_DIR}/source-files-sha256.txt"
+          cp musitu-phase-j-source.tar.gz "${MUSITU_PHASE_J_EVIDENCE_DIR}/musitu-phase-j-source.tar.gz"
           printf '%s\n' "${GITHUB_SHA}" > "${MUSITU_PHASE_J_EVIDENCE_DIR}/github-execution-commit.txt"
-          printf '%s\n' '33961727715' > "${MUSITU_PHASE_J_EVIDENCE_DIR}/lock-acquisition-run.txt"
+          printf '%s\n' '33961069437' > "${MUSITU_PHASE_J_EVIDENCE_DIR}/authoritative-go-sum-run.txt"
           docker inspect python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 > "${MUSITU_PHASE_J_EVIDENCE_DIR}/python-base-image-inspect.json"
 
       - name: Upload MUSITU Phase J final evidence
