@@ -20,6 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cat musitu-phase-j-source.b64.part-* > musitu-phase-j-source.tar.gz.b64
           base64 -d musitu-phase-j-source.tar.gz.b64 > musitu-phase-j-source.tar.gz
           sha256sum -c MUSITU_PHASE_J_SOURCE_SHA256.txt
           tar -xzf musitu-phase-j-source.tar.gz
