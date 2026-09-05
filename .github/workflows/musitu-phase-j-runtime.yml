@@ -1,4 +1,4 @@
-name: MUSITU Phase J dependency acquisition
+name: MUSITU Phase J final locked runtime proof
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   phase-j-runtime:
@@ -16,7 +17,7 @@ jobs:
       - name: Checkout execution branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - name: Restore exact MUSITU Phase J source
+      - name: Restore verified MUSITU Phase J source
         shell: bash
         run: |
           set -euo pipefail
@@ -27,31 +28,41 @@ jobs:
           sha256sum -c MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
           chmod +x scripts/phase-j-runtime-proof.sh
 
+      - name: Restore acquired immutable Go lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOCK_DIR="${RUNNER_TEMP}/musitu-phase-j-lock"
+          mkdir -p "${LOCK_DIR}"
+          gh run download 33961727715 \
+            --repo evansmusitu/aurora.com \
+            --name musitu-phase-j-lock-acquisition-33961727715 \
+            --dir "${LOCK_DIR}"
+          test -s "${LOCK_DIR}/airgrid-go.mod"
+          test -s "${LOCK_DIR}/airgrid-go.sum"
+          printf '%s  %s\n' '81a36799987a75c0101cdea29f6ae3752d12730425e5f12e1a6536226968b4da' "${LOCK_DIR}/airgrid-go.mod" | sha256sum -c -
+          printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' "${LOCK_DIR}/airgrid-go.sum" | sha256sum -c -
+          cp "${LOCK_DIR}/airgrid-go.mod" airgrid/transport/local-libp2p/go.mod
+          cp "${LOCK_DIR}/airgrid-go.sum" airgrid/transport/local-libp2p/go.sum
+
       - name: Install Go 1.27.1
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: '1.27.1'
           cache: false
 
-      - name: Acquire complete Go module lock
-        env:
-          MUSITU_PHASE_J_EVIDENCE_DIR: ${{ runner.temp }}/musitu-phase-j-runtime
+      - name: Verify immutable Go module graph
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "${MUSITU_PHASE_J_EVIDENCE_DIR}"
           cd airgrid/transport/local-libp2p
-          go mod tidy
+          go mod download
           go mod verify
           go version
-          cp go.mod "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.mod"
-          cp go.sum "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.sum"
-          sha256sum go.mod > "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.mod.sha256"
-          sha256sum go.sum > "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.sum.sha256"
-          echo '--- resolved go.mod ---'
-          cat go.mod
-          echo '--- resolved hashes ---'
-          sha256sum go.mod go.sum
+          printf '%s  %s\n' '81a36799987a75c0101cdea29f6ae3752d12730425e5f12e1a6536226968b4da' 'go.mod' | sha256sum -c -
+          printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' 'go.sum' | sha256sum -c -
 
       - name: Verify Docker substrate
         shell: bash
@@ -60,21 +71,27 @@ jobs:
           docker version
           docker info
 
-      - name: Re-run MUSITU Phase J proof on resolved lock
+      - name: Run MUSITU Phase J final locked runtime proof
         env:
           MUSITU_PHASE_J_EVIDENCE_DIR: ${{ runner.temp }}/musitu-phase-j-runtime
         shell: bash
         run: |
           set -euo pipefail
           ./scripts/phase-j-runtime-proof.sh
+          cp airgrid/transport/local-libp2p/go.mod "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.mod"
+          cp airgrid/transport/local-libp2p/go.sum "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.sum"
+          sha256sum airgrid/transport/local-libp2p/go.mod > "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.mod.sha256"
+          sha256sum airgrid/transport/local-libp2p/go.sum > "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.sum.sha256"
           cp MUSITU_PHASE_J_SOURCE_SHA256.txt "${MUSITU_PHASE_J_EVIDENCE_DIR}/source-archive-sha256.txt"
           cp MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt "${MUSITU_PHASE_J_EVIDENCE_DIR}/source-files-sha256.txt"
           printf '%s\n' "${GITHUB_SHA}" > "${MUSITU_PHASE_J_EVIDENCE_DIR}/github-execution-commit.txt"
+          printf '%s\n' '33961727715' > "${MUSITU_PHASE_J_EVIDENCE_DIR}/lock-acquisition-run.txt"
+          docker inspect python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 > "${MUSITU_PHASE_J_EVIDENCE_DIR}/python-base-image-inspect.json"
 
-      - name: Upload MUSITU Phase J acquisition evidence
+      - name: Upload MUSITU Phase J final evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: musitu-phase-j-lock-acquisition-${{ github.run_id }}
+          name: musitu-phase-j-final-locked-${{ github.run_id }}
           path: ${{ runner.temp }}/musitu-phase-j-runtime
           if-no-files-found: warn
