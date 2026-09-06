@@ -1,0 +1,182 @@
+name: MUSITU Phase K DAST acquisition
+
+on:
+  push:
+    branches:
+      - musitu-continuum-phase-k-dast-acquisition
+    paths:
+      - '.github/workflows/musitu-phase-k-dast-acquisition.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  zap-api-dast:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated execution branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Reconstruct and verify exact hardened Python candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/source work/runtime work/zap evidence
+          cat phase-k-sast-proof/source.b64.part-* > work/source.tar.gz.b64
+          base64 -d work/source.tar.gz.b64 > work/source.tar.gz
+          printf '%s  %s\n' 'bb4642bca554ee1a5ac22d605aa77114508e90ea5c133364b95b85cc336c964c' 'work/source.tar.gz' | sha256sum -c -
+          tar -xzf work/source.tar.gz -C work/source
+          (cd work/source && sha256sum -c ../../phase-k-sast-proof/SOURCE_FILES_SHA256.txt)
+          cat phase-k-sast-hardening/python-patch.b64.part-* > work/python-hardening.patch.b64
+          base64 -d work/python-hardening.patch.b64 > work/python-hardening.patch
+          printf '%s  %s\n' '6a63443bb44a9051207bf2bc6dca6974cce366b324992dab9afc26347ba73f59' 'work/python-hardening.patch' | sha256sum -c -
+          (cd work/source && patch -p1 < ../python-hardening.patch)
+          (cd work/source && sha256sum -c ../../phase-k-sast-hardening/CANDIDATE_SOURCE_FILES_SHA256.txt)
+          printf '%s\n' 'd7dbaac044a0eb038297d3af18667e6e960607f8' > evidence/CANONICAL_CHECKPOINT.txt
+          printf '%s\n' "${GITHUB_SHA}" > evidence/GITHUB_EXECUTION_COMMIT.txt
+
+      - name: Prepare lab fixtures and OpenAPI scan definitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > work/runtime/network_snapshot.json <<'JSON'
+          {"source":"fixture","observed_at":"2026-09-04T00:00:00+00:00","subscribers":[{"subscriber_id":"001011234567895","provisioned":true,"access_state":"registered"}],"sessions":[{"subscriber_id":"001011234567895","session_id":"1","state":"active","access_type":"5G-SA","ip_address":"192.168.100.2"}],"evidence":{"fixture":true}}
+          JSON
+          cat > work/runtime/camara_device_map.json <<'JSON'
+          {"phoneNumber":{"+263700000001":"001011234567895"}}
+          JSON
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          out=Path('work/zap')
+          specs={
+            'control': {
+              'openapi':'3.0.3','info':{'title':'MUSITU Control lab DAST','version':'1'},
+              'servers':[{'url':'http://127.0.0.1:18787'}],
+              'paths':{
+                '/healthz':{'get':{'responses':{'200':{'description':'ok'}}}},
+                '/v1/network/state':{'get':{'responses':{'200':{'description':'ok'}}}},
+                '/v1/control/overview':{'get':{'responses':{'200':{'description':'ok'}}}},
+                '/device-reachability-status/v1/retrieve':{'post':{'requestBody':{'required':True,'content':{'application/json':{'schema':{'type':'object','properties':{'device':{'type':'object','properties':{'phoneNumber':{'type':'string','example':'+263700000001'}},'required':['phoneNumber']}},'required':['device']}}}},'responses':{'200':{'description':'ok'},'400':{'description':'bad request'},'422':{'description':'unprocessable'}}}}
+              }
+            },
+            'mobile': {
+              'openapi':'3.0.3','info':{'title':'MUSITU Mobile lab DAST','version':'1'},
+              'servers':[{'url':'http://127.0.0.1:18782'}],
+              'paths':{
+                '/healthz':{'get':{'responses':{'200':{'description':'ok'}}}},
+                '/v1/zerosim/profiles':{'get':{'parameters':[{'name':'device_id','in':'query','required':True,'schema':{'type':'string','example':'dast-device'}}],'responses':{'200':{'description':'ok'}}}},
+                '/v1/onboarding':{'post':{'requestBody':{'required':True,'content':{'application/json':{'schema':{'type':'object','properties':{'device_id':{'type':'string','example':'dast-device'}},'required':['device_id']}}}},'responses':{'200':{'description':'ok'},'400':{'description':'bad request'}}}},
+                '/v1/zerosim/activate':{'post':{'requestBody':{'required':True,'content':{'application/json':{'schema':{'type':'object','properties':{'device_id':{'type':'string','example':'dast-device'},'activation_code':{'type':'string','example':'LAB-ONLY-CODE'}},'required':['device_id','activation_code']}}}},'responses':{'200':{'description':'ok'},'400':{'description':'bad request'},'503':{'description':'unavailable'}}}}
+              }
+            },
+            'identity': {
+              'openapi':'3.0.3','info':{'title':'MUSITU Identity lab DAST','version':'1'},
+              'servers':[{'url':'http://127.0.0.1:18781'}],
+              'paths':{'/healthz':{'get':{'responses':{'200':{'description':'ok'}}}}}
+            },
+            'edge': {
+              'openapi':'3.0.3','info':{'title':'MUSITU Edge lab DAST','version':'1'},
+              'servers':[{'url':'http://127.0.0.1:18080'}],
+              'paths':{
+                '/healthz':{'get':{'responses':{'200':{'description':'ok'}}}},
+                '/v1/edge/status':{'get':{'responses':{'200':{'description':'ok'}}}}
+              }
+            }
+          }
+          for name,spec in specs.items():
+              (out/f'{name}-openapi.json').write_text(json.dumps(spec,sort_keys=True),encoding='utf-8')
+          PY
+          sha256sum work/zap/*-openapi.json work/runtime/network_snapshot.json work/runtime/camara_device_map.json > evidence/scan-input-sha256.txt
+
+      - name: Start exact lab HTTP targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          export MUSITU_STATE_PROVIDER=fixture
+          export MUSITU_STATE_FIXTURE="$PWD/work/runtime/network_snapshot.json"
+          export MUSITU_CAMARA_DEVICE_MAP="$PWD/work/runtime/camara_device_map.json"
+          export MUSITU_CONTROL_PORT=18787
+          export MUSITU_IDENTITY_HEALTH_URL=http://127.0.0.1:18781/healthz
+          export MUSITU_MOBILE_HEALTH_URL=http://127.0.0.1:18782/healthz
+          PYTHONPATH="$PWD/work/source/services/network-api" python3 -m musitu_control.server > evidence/control-server.log 2>&1 & echo $! > work/control.pid
+          MUSITU_IDENTITY_PORT=18781 PYTHONPATH="$PWD/work/source/services/identity" python3 -m musitu_identity.server > evidence/identity-server.log 2>&1 & echo $! > work/identity.pid
+          MUSITU_MOBILE_PORT=18782 MUSITU_ZEROSIM_PROVIDER=demo MUSITU_ZEROSIM_DB="$PWD/work/runtime/mobile.sqlite3" PYTHONPATH="$PWD/work/source/apps/musitu-mobile:$PWD/work/source/services/zerosim" python3 -m musitu_mobile.server > evidence/mobile-server.log 2>&1 & echo $! > work/mobile.pid
+          MUSITU_EDGE_HOST=127.0.0.1 MUSITU_EDGE_PORT=18080 MUSITU_EDGE_CACHE="$PWD/work/runtime/edge.sqlite3" PYTHONPATH="$PWD/work/source/edge" python3 -m musitu_edge.app > evidence/edge-server.log 2>&1 & echo $! > work/edge.pid
+          for url in http://127.0.0.1:18787/healthz http://127.0.0.1:18781/healthz http://127.0.0.1:18782/healthz http://127.0.0.1:18080/healthz; do
+            for i in $(seq 1 100); do
+              if curl -fsS "$url" >/dev/null; then break; fi
+              sleep 0.1
+            done
+            curl -fsS "$url" >> evidence/target-health.jsonl
+            printf '\n' >> evidence/target-health.jsonl
+          done
+
+      - name: Acquire exact ZAP image identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull ghcr.io/zaproxy/zaproxy:2.17.0
+          docker image inspect --format '{{.Id}}' ghcr.io/zaproxy/zaproxy:2.17.0 | tee evidence/zap-image-id.txt
+          docker image inspect --format '{{join .RepoDigests "\n"}}' ghcr.io/zaproxy/zaproxy:2.17.0 | tee evidence/zap-image-repodigests.txt
+          docker run --rm ghcr.io/zaproxy/zaproxy:2.17.0 zap.sh -version | tee evidence/zap-version.txt
+
+      - name: Run active ZAP API scans and preserve raw reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod -R a+rwX work/zap
+          : > evidence/zap-exit-codes.txt
+          for target in control mobile identity edge; do
+            set +e
+            docker run --rm --network host -v "$PWD/work/zap:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:2.17.0 \
+              zap-api-scan.py -t "/zap/wrk/${target}-openapi.json" -f openapi -I -T 5 \
+              -J "${target}-zap.json" -r "${target}-zap.html"
+            rc=$?
+            set -e
+            printf '%s=%s\n' "$target" "$rc" | tee -a evidence/zap-exit-codes.txt
+            test -s "work/zap/${target}-zap.json"
+            cp "work/zap/${target}-zap.json" "evidence/${target}-zap.json"
+            cp "work/zap/${target}-zap.html" "evidence/${target}-zap.html"
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          summary={}
+          for target in ('control','mobile','identity','edge'):
+              report=json.loads(Path(f'evidence/{target}-zap.json').read_text(encoding='utf-8'))
+              sites=report.get('site',[])
+              alerts=[]
+              for site in sites:
+                  alerts.extend(site.get('alerts',[]))
+              risks={}
+              for a in alerts:
+                  r=a.get('riskdesc','UNKNOWN').split(' ',1)[0].upper()
+                  risks[r]=risks.get(r,0)+1
+              summary[target]={'alert_count':len(alerts),'risk_counts':risks,'sites':len(sites)}
+          Path('evidence/zap-summary.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          print(json.dumps(summary,sort_keys=True))
+          PY
+
+      - name: Assemble DAST acquisition evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          docker version > evidence/docker-version.txt 2>&1 || true
+          printf '%s\n' 'Internal active DAST acquisition against exact hardened MUSITU lab HTTP targets. This does not satisfy independent penetration testing, production security review, privacy/DPIA, telecom approvals, reliability certification, or RF hardware validation.' > evidence/CLAIM_BOUNDARY.txt
+          sha256sum evidence/* > evidence/EVIDENCE_SHA256.txt 2>/dev/null || true
+          for p in work/*.pid; do [ -f "$p" ] && kill "$(cat "$p")" 2>/dev/null || true; done
+
+      - name: Upload DAST acquisition evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-k-dast-acquisition-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
