@@ -1,0 +1,96 @@
+name: MUSITU Phase K Rust vulnerability audit
+
+on:
+  push:
+    branches:
+      - musitu-continuum-phase-k-rust-lock
+    paths:
+      - '.github/workflows/musitu-phase-k-rust-vuln-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rust-vulnerability-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout execution branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Verify exact MUSITU Matrix source bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd phase-k-rust-lock/matrix-online
+          printf '%s  %s\n' '4646a000220a00415c9a1f31187bc78e6293535ef93a888e7512aff0656bd94d' 'Cargo.toml' | sha256sum -c -
+          printf '%s  %s\n' '741105ac666a38a569834baf6e6c990eb897357e113924d41ba43019faa9a7cc' 'src/lib.rs' | sha256sum -c -
+          printf '%s  %s\n' '8b77785b25a56f4e18a7339fdf615d16ae7086907826497523f6d8613f16aa3e' 'tests/contract.rs' | sha256sum -c -
+          printf '%s  %s\n' 'f5b187e39f6465376e2721bc273b9af276d8417ac1b2ef3a6cf6082ef9ba77c0' 'tests/live_synapse.rs' | sha256sum -c -
+          printf '%s  %s\n' '3a5841f91be1298f75ca77bd896cdc6c9c34bd61ca8cc64615073998be24c439' 'tests/live_encrypted_synapse.rs' | sha256sum -c -
+
+      - name: Install exact Rust toolchain and cargo-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/evidence"
+          rustup toolchain install 1.93.0 --profile minimal
+          rustup override set 1.93.0 --path phase-k-rust-lock/matrix-online
+          rustc +1.93.0 --version | tee "${RUNNER_TEMP}/evidence/rustc-version.txt"
+          cargo +1.93.0 --version | tee "${RUNNER_TEMP}/evidence/cargo-version.txt"
+          cargo +1.93.0 install cargo-audit --version 0.22.2 --locked
+          cargo audit --version | tee "${RUNNER_TEMP}/evidence/cargo-audit-version.txt"
+
+      - name: Reproduce canonical Cargo lock and pin current RustSec database snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          ev="${RUNNER_TEMP}/evidence"
+          cd phase-k-rust-lock/matrix-online
+          cargo +1.93.0 generate-lockfile
+          printf '%s  %s\n' '30541d6f6fd794440d92aedb609fd4cb4a50b64b40d2cb0b514895a560b1f9c5' 'Cargo.lock' | sha256sum -c -
+          cp Cargo.lock "${ev}/Cargo.lock"
+          sha256sum Cargo.toml Cargo.lock > "${ev}/rust-lock-sha256.txt"
+          cd "${GITHUB_WORKSPACE}"
+          git clone --depth 1 https://github.com/RustSec/advisory-db.git rustsec-advisory-db
+          git -C rustsec-advisory-db rev-parse HEAD > "${ev}/rustsec-advisory-db-commit.txt"
+
+      - name: Run current Rust dependency vulnerability audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ev="${RUNNER_TEMP}/evidence"
+          cd phase-k-rust-lock/matrix-online
+          set +e
+          cargo audit --db "${GITHUB_WORKSPACE}/rustsec-advisory-db" --json > "${ev}/cargo-audit.json" 2> "${ev}/cargo-audit-json.stderr.txt"
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "${ev}/cargo-audit-exit-code.txt"
+          set +e
+          cargo audit --db "${GITHUB_WORKSPACE}/rustsec-advisory-db" > "${ev}/cargo-audit.txt" 2>&1
+          set -e
+          printf '%s\n' "${GITHUB_SHA}" > "${ev}/execution-commit.txt"
+          printf '%s\n' '0.22.2' > "${ev}/scanner-version-pin.txt"
+          printf '%s\n' 'Current Rust dependency vulnerability audit only; not SAST, penetration testing, independent review, or production readiness.' > "${ev}/CLAIM_BOUNDARY.txt"
+
+      - name: Upload Rust vulnerability audit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-k-rust-vuln-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+      - name: Enforce clean Rust vulnerability result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rc="$(cat "${RUNNER_TEMP}/evidence/cargo-audit-exit-code.txt")"
+          if [ "$rc" -ne 0 ]; then
+            echo "cargo audit returned $rc; findings or scanner failure require review"
+            cat "${RUNNER_TEMP}/evidence/cargo-audit.txt" || true
+            exit "$rc"
+          fi
