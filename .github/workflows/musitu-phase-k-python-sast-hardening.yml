@@ -29,10 +29,10 @@ jobs:
           (cd work/source && sha256sum -c ../../phase-k-sast-proof/SOURCE_FILES_SHA256.txt)
           test "$(find work/source -type f -name '*.py' | wc -l)" -eq 44
           test "$(find work/source -type f | wc -l)" -eq 44
-          cat phase-k-sast-hardening/patch.b64.part-* > work/hardening.patch.b64
-          base64 -d work/hardening.patch.b64 > work/hardening.patch
-          printf '%s  %s\n' '30e73a5942e7e1ad3298bfbb54cb0608031c1281bd4f569ebbeb62e57b3150f2' 'work/hardening.patch' | sha256sum -c -
-          (cd work/source && git apply ../hardening.patch)
+          cat phase-k-sast-hardening/python-patch.b64.part-* > work/python-hardening.patch.b64
+          base64 -d work/python-hardening.patch.b64 > work/python-hardening.patch
+          printf '%s  %s\n' '6a63443bb44a9051207bf2bc6dca6974cce366b324992dab9afc26347ba73f59' 'work/python-hardening.patch' | sha256sum -c -
+          (cd work/source && patch -p1 < ../python-hardening.patch)
           (cd work/source && sha256sum -c ../../phase-k-sast-hardening/CANDIDATE_SOURCE_FILES_SHA256.txt)
           test "$(find work/source -type f -name '*.py' | wc -l)" -eq 44
           test "$(find work/source -type f | wc -l)" -eq 44
@@ -87,8 +87,8 @@ jobs:
           python3 -m pip freeze > evidence/pip-freeze.txt 2>&1 || true
           cp phase-k-sast-proof/SOURCE_ARCHIVE_SHA256.txt evidence/BASE_SOURCE_ARCHIVE_SHA256.txt
           cp phase-k-sast-hardening/CANDIDATE_SOURCE_FILES_SHA256.txt evidence/
-          sha256sum work/hardening.patch > evidence/hardening-patch-sha256.txt 2>&1 || true
-          printf '%s\n' '5ebe226a1b5d77bcf070decffc6c508d8bd552ba + exact nine-file SAST hardening candidate' > evidence/CANONICAL_CANDIDATE.txt
+          sha256sum work/python-hardening.patch > evidence/python-hardening-patch-sha256.txt 2>&1 || true
+          printf '%s\n' '5ebe226a1b5d77bcf070decffc6c508d8bd552ba + exact eight-Python-file SAST hardening candidate; Docker host opt-in is verified separately by runtime reproof.' > evidence/CANONICAL_CANDIDATE.txt
           printf '%s\n' "${GITHUB_SHA}" > evidence/GITHUB_EXECUTION_COMMIT.txt
           printf '%s\n' 'MUSITU Phase K Python SAST hardening evidence only. This does not satisfy DAST, independent penetration testing, DPIA, telecom regulatory gates, production readiness, or RF hardware validation.' > evidence/CLAIM_BOUNDARY.txt
 
