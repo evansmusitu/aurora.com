@@ -1,0 +1,13 @@
+[package]
+name = "musitu-matrix-transport"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+
+[dependencies]
+anyhow = "1.0"
+matrix-sdk = "=0.18.0"
+serde_json = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
