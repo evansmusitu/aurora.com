@@ -56,11 +56,7 @@ jobs:
           printf '%s  %s\n' '455602f21e1997e1a2ae99ceb332dd9e7aae41b4825530e123fc29910353190d' 'edge/musitu_edge/app.py' | sha256sum -c -
           printf '%s  %s\n' 'f4e63b085a0a9dccf5f164975c07ad43f3a2c52c641a0278f4b80d30b22b8df9' 'edge/community-node/Dockerfile' | sha256sum -c -
           grep -Fx 'ENV MUSITU_EDGE_HOST=0.0.0.0' edge/community-node/Dockerfile
-          PYTHONPATH=edge python3 - <<'PY'
-          from musitu_edge.app import runtime_config
-          assert runtime_config({}).host == '127.0.0.1'
-          assert runtime_config({'MUSITU_EDGE_HOST':'0.0.0.0'}).host == '0.0.0.0'
-          PY
+          PYTHONPATH=edge python3 -c "from musitu_edge.app import runtime_config; assert runtime_config({}).host == '127.0.0.1'; assert runtime_config({'MUSITU_EDGE_HOST':'0.0.0.0'}).host == '0.0.0.0'"
 
       - name: Verify Docker substrate and pinned base
         shell: bash
