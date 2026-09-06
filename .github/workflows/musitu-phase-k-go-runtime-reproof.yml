@@ -1,0 +1,81 @@
+name: MUSITU Phase K Go runtime reproof
+
+on:
+  push:
+    branches:
+      - musitu-continuum-phase-k-go-vuln-audit
+    paths:
+      - '.github/workflows/musitu-phase-k-go-runtime-reproof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  runtime-reproof:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout execution branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Restore historical Phase J source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat musitu-phase-j-source.b64.part-* > musitu-phase-j-source.tar.gz.b64
+          base64 -d musitu-phase-j-source.tar.gz.b64 > musitu-phase-j-source.tar.gz
+          sha256sum -c MUSITU_PHASE_J_SOURCE_SHA256.txt
+          tar -xzf musitu-phase-j-source.tar.gz
+          sha256sum -c MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
+          chmod +x scripts/phase-j-runtime-proof.sh
+
+      - name: Install Go 1.27.1
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Apply and verify Phase K Go security locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd airgrid/transport/local-libp2p
+          go get github.com/pion/dtls/v3@v3.1.4 github.com/pion/stun/v3@v3.1.5 golang.org/x/crypto@v0.56.0
+          go mod tidy
+          printf '%s  %s\n' 'a76f8f678701089cf1e3335939d85032fbadbafb1309cccaa8b2e4b9a645d04b' 'go.mod' | sha256sum -c -
+          printf '%s  %s\n' 'be2e8c598b2277d8075cec7ade1506bc92f97bc3560ab956b664bbc5bcd59fbd' 'go.sum' | sha256sum -c -
+          go test ./... -v | tee ../../../go-test-remediated.log
+
+      - name: Verify Docker substrate and pinned base
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker info
+          grep -F 'FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285' edge/community-node/Dockerfile
+          docker pull python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+
+      - name: Run remediated MUSITU Phase J runtime proof
+        env:
+          MUSITU_PHASE_J_EVIDENCE_DIR: ${{ runner.temp }}/musitu-phase-k-go-runtime-reproof
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/phase-j-runtime-proof.sh
+          cp airgrid/transport/local-libp2p/go.mod "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.mod"
+          cp airgrid/transport/local-libp2p/go.sum "${MUSITU_PHASE_J_EVIDENCE_DIR}/airgrid-go.sum"
+          cp go-test-remediated.log "${MUSITU_PHASE_J_EVIDENCE_DIR}/go-test-remediated.log"
+          sha256sum airgrid/transport/local-libp2p/go.mod airgrid/transport/local-libp2p/go.sum > "${MUSITU_PHASE_J_EVIDENCE_DIR}/remediated-go-lock-sha256.txt"
+          printf '%s\n' "${GITHUB_SHA}" > "${MUSITU_PHASE_J_EVIDENCE_DIR}/github-execution-commit.txt"
+          printf '%s\n' 'Phase K Go dependency remediation runtime reproof; production readiness and RF hardware are not implied.' > "${MUSITU_PHASE_J_EVIDENCE_DIR}/CLAIM_BOUNDARY.txt"
+
+      - name: Upload remediated runtime evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-k-go-runtime-reproof-${{ github.run_id }}
+          path: ${{ runner.temp }}/musitu-phase-k-go-runtime-reproof
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 90
