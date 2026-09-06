@@ -1,0 +1,92 @@
+name: MUSITU Phase K Go vulnerability audit
+
+on:
+  push:
+    branches:
+      - musitu-continuum-phase-k-go-vuln-audit
+    paths:
+      - '.github/workflows/musitu-phase-k-go-vuln-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  go-vulnerability-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout execution branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Restore exact locked MUSITU Go source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat musitu-phase-j-source.b64.part-* > musitu-phase-j-source.tar.gz.b64
+          base64 -d musitu-phase-j-source.tar.gz.b64 > musitu-phase-j-source.tar.gz
+          sha256sum -c MUSITU_PHASE_J_SOURCE_SHA256.txt
+          tar -xzf musitu-phase-j-source.tar.gz
+          sha256sum -c MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
+          printf '%s  %s\n' '81a36799987a75c0101cdea29f6ae3752d12730425e5f12e1a6536226968b4da' 'airgrid/transport/local-libp2p/go.mod' | sha256sum -c -
+          printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' 'airgrid/transport/local-libp2p/go.sum' | sha256sum -c -
+
+      - name: Install Go 1.27.1
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Install exact govulncheck scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/gobin" "${RUNNER_TEMP}/evidence"
+          GOBIN="${RUNNER_TEMP}/gobin" go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          "${RUNNER_TEMP}/gobin/govulncheck" -version | tee "${RUNNER_TEMP}/evidence/govulncheck-version.txt"
+          go version -m "${RUNNER_TEMP}/gobin/govulncheck" > "${RUNNER_TEMP}/evidence/govulncheck-build-info.txt"
+          go version > "${RUNNER_TEMP}/evidence/go-version.txt"
+
+      - name: Verify immutable Go graph and run current vulnerability audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ev="${RUNNER_TEMP}/evidence"
+          cd airgrid/transport/local-libp2p
+          go mod download
+          go mod verify
+          printf '%s  %s\n' '81a36799987a75c0101cdea29f6ae3752d12730425e5f12e1a6536226968b4da' 'go.mod' | sha256sum -c -
+          printf '%s  %s\n' '883d23a0f1508aea026c7a2fe82a6c60eff5ad53c924aa6112d5e038edc77a91' 'go.sum' | sha256sum -c -
+          sha256sum go.mod go.sum > "${ev}/go-lock-sha256.txt"
+          set +e
+          "${RUNNER_TEMP}/gobin/govulncheck" -test -json ./... > "${ev}/govulncheck.json" 2> "${ev}/govulncheck-json.stderr.txt"
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "${ev}/govulncheck-exit-code.txt"
+          set +e
+          "${RUNNER_TEMP}/gobin/govulncheck" -test ./... > "${ev}/govulncheck.txt" 2>&1
+          set -e
+          printf '%s\n' "${GITHUB_SHA}" > "${ev}/execution-commit.txt"
+          printf '%s\n' 'v1.7.0' > "${ev}/scanner-version-pin.txt"
+          printf '%s\n' 'Current Go dependency vulnerability audit only; not SAST, penetration testing, independent review, or production readiness.' > "${ev}/CLAIM_BOUNDARY.txt"
+
+      - name: Upload Go vulnerability audit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-k-go-vuln-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+      - name: Enforce clean Go vulnerability result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rc="$(cat "${RUNNER_TEMP}/evidence/govulncheck-exit-code.txt")"
+          if [ "$rc" -ne 0 ]; then
+            echo "govulncheck returned $rc; findings or scanner failure require review"
+            cat "${RUNNER_TEMP}/evidence/govulncheck.txt" || true
+            exit "$rc"
+          fi
