@@ -1,0 +1,90 @@
+name: MUSITU Phase K Python SAST proof
+
+on:
+  push:
+    branches:
+      - musitu-continuum-phase-k-sast-v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  python-sast:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated execution branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Verify exact canonical Python source bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd phase-k-sast-v2
+          sha256sum -c SOURCE_ARCHIVE_SHA256.txt
+          rm -rf source
+          mkdir source
+          tar -xzf musitu-python-sast-source.tar.gz -C source
+          (cd source && sha256sum -c ../SOURCE_FILES_SHA256.txt)
+          test "$(find source -type f -name '*.py' | wc -l)" -eq 44
+          test "$(find source -type f | wc -l)" -eq 44
+
+      - name: Install pinned Bandit scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -m pip install --disable-pip-version-check 'bandit==1.9.4'
+          bandit --version
+
+      - name: Run Bandit and preserve raw findings
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          set +e
+          bandit -r phase-k-sast-v2/source -f json -o evidence/bandit.json
+          status=$?
+          set -e
+          printf '%s\n' "$status" > evidence/bandit-exit-code.txt
+          test -s evidence/bandit.json
+          python3 - <<'PY'
+          import json
+          with open('evidence/bandit.json', encoding='utf-8') as f:
+              report = json.load(f)
+          summary = {
+              'results': len(report.get('results', [])),
+              'metrics': report.get('metrics', {}).get('_totals', {}),
+              'errors': report.get('errors', []),
+          }
+          with open('evidence/bandit-summary.json', 'w', encoding='utf-8') as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+              f.write('\n')
+          PY
+
+      - name: Assemble SAST evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 --version > evidence/python-version.txt 2>&1 || true
+          bandit --version > evidence/bandit-version.txt 2>&1 || true
+          python3 -m pip freeze > evidence/pip-freeze.txt 2>&1 || true
+          cp phase-k-sast-v2/SOURCE_ARCHIVE_SHA256.txt evidence/
+          cp phase-k-sast-v2/SOURCE_FILES_SHA256.txt evidence/
+          sha256sum phase-k-sast-v2/musitu-python-sast-source.tar.gz > evidence/source-archive-actual-sha256.txt
+          printf '%s\n' '5ebe226a1b5d77bcf070decffc6c508d8bd552ba' > evidence/CANONICAL_SOURCE_COMMIT.txt
+          printf '%s\n' "${GITHUB_SHA}" > evidence/GITHUB_EXECUTION_COMMIT.txt
+          printf '%s\n' 'MUSITU Phase K Python SAST evidence only. This does not satisfy DAST, independent penetration testing, DPIA, telecom regulatory gates, production readiness, or RF hardware validation.' > evidence/CLAIM_BOUNDARY.txt
+
+      - name: Upload raw SAST evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-k-python-sast-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
