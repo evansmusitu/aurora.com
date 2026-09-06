@@ -1,0 +1,25 @@
+diff --git a/edge/community-node/Dockerfile b/edge/community-node/Dockerfile
+index 985d3be..6eb2e1b 100644
+--- a/edge/community-node/Dockerfile
++++ b/edge/community-node/Dockerfile
+@@ -2,6 +2,7 @@ FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb
+ 
+ ENV PYTHONDONTWRITEBYTECODE=1 \
+     PYTHONUNBUFFERED=1
++ENV MUSITU_EDGE_HOST=0.0.0.0
+ 
+ RUN useradd --create-home --uid 10001 musitu \
+     && mkdir -p /opt/musitu /var/lib/musitu \
+diff --git a/edge/musitu_edge/app.py b/edge/musitu_edge/app.py
+index a10da0f..8724d2b 100644
+--- a/edge/musitu_edge/app.py
++++ b/edge/musitu_edge/app.py
+@@ -21,7 +21,7 @@ class RuntimeConfig:
+ def runtime_config(env: Mapping[str, str]) -> RuntimeConfig:
+     return RuntimeConfig(
+         node_id=env.get("MUSITU_EDGE_NODE_ID", "musitu-edge-lab"),
+-        host=env.get("MUSITU_EDGE_HOST", "0.0.0.0"),
++        host=env.get("MUSITU_EDGE_HOST", "127.0.0.1"),
+         port=int(env.get("MUSITU_EDGE_PORT", "8080")),
+         cache_path=Path(env.get("MUSITU_EDGE_CACHE", "/var/lib/musitu/edge-cache.sqlite3")),
+     )
