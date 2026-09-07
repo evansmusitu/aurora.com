@@ -1,0 +1,93 @@
+name: MUSITU Phase K reliability SAST delta proof
+
+on:
+  push:
+    branches:
+      - musitu-continuum-phase-k-reliability-sast-delta
+    paths:
+      - '.github/workflows/musitu-phase-k-reliability-sast-delta.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  reliability-sast-delta:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated execution branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Reconstruct prior admitted SAST candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/source
+          cat phase-k-sast-proof/source.b64.part-* > work/source.tar.gz.b64
+          base64 -d work/source.tar.gz.b64 > work/source.tar.gz
+          printf '%s  %s\n' 'bb4642bca554ee1a5ac22d605aa77114508e90ea5c133364b95b85cc336c964c' work/source.tar.gz | sha256sum -c -
+          tar -xzf work/source.tar.gz -C work/source
+          (cd work/source && sha256sum -c ../../phase-k-sast-proof/SOURCE_FILES_SHA256.txt)
+          cat phase-k-sast-hardening/python-patch.b64.part-* > work/python-hardening.patch.b64
+          base64 -d work/python-hardening.patch.b64 > work/python-hardening.patch
+          printf '%s  %s\n' '6a63443bb44a9051207bf2bc6dca6974cce366b324992dab9afc26347ba73f59' work/python-hardening.patch | sha256sum -c -
+          (cd work/source && patch -p1 < ../python-hardening.patch)
+          (cd work/source && sha256sum -c ../../phase-k-sast-hardening/CANDIDATE_SOURCE_FILES_SHA256.txt)
+      - name: Apply final DAST and reliability remediation delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat phase-k-reliability-sast-delta/patch.b64.part-* > work/final.patch.b64
+          base64 -d work/final.patch.b64 > work/final.patch
+          printf '%s  %s\n' '11354b6287580f836811a30973529043ff98b2fcfeda8773d36f98840fcf739d' work/final.patch | sha256sum -c -
+          (cd work/source && patch -p1 < ../final.patch)
+          printf '%s  %s\n' '69883df5cbf2ef4116dfa12c600646669d9257540ddcd9a9bc3a67f48a9f6f11' phase-k-reliability-sast-delta/PRODUCTION_SOURCE_FILES_SHA256.txt | sha256sum -c -
+          (cd work/source && sha256sum -c ../../phase-k-reliability-sast-delta/PRODUCTION_SOURCE_FILES_SHA256.txt)
+          printf '%s  %s\n' '0d0584950cc63d51b3066565284c87d7f321aefadd2e8ecc1439967e4be7559f' work/source/apps/musitu-mobile/musitu_mobile/server.py | sha256sum -c -
+          printf '%s  %s\n' 'd994757573f8f07ec6138dbbbede2032ee9a46ff9b8b9859878fe89913c68a6e' work/source/services/network-api/musitu_control/server.py | sha256sum -c -
+      - name: Install pinned Bandit scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check 'bandit==1.9.4'
+          bandit --version
+      - name: Scan changed production modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          set +e
+          bandit work/source/apps/musitu-mobile/musitu_mobile/server.py work/source/services/network-api/musitu_control/server.py -f json -o evidence/bandit-delta.json
+          status=$?
+          set -e
+          printf '%s\n' "$status" > evidence/bandit-exit-code.txt
+          test -s evidence/bandit-delta.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('evidence/bandit-delta.json').read_text())
+          results=report.get('results',[])
+          summary={'results':len(results),'severity':{s:sum(1 for i in results if i.get('issue_severity')==s) for s in ('HIGH','MEDIUM','LOW')},'errors':report.get('errors',[]),'scanned_files':['apps/musitu-mobile/musitu_mobile/server.py','services/network-api/musitu_control/server.py']}
+          Path('evidence/bandit-delta-summary.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Assemble evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          bandit --version > evidence/bandit-version.txt 2>&1 || true
+          cp phase-k-reliability-sast-delta/PRODUCTION_SOURCE_FILES_SHA256.txt evidence/
+          sha256sum work/final.patch > evidence/final-patch-sha256.txt 2>&1 || true
+          printf '%s\n' "${GITHUB_SHA}" > evidence/GITHUB_EXECUTION_COMMIT.txt
+          printf '%s\n' 'Incremental Bandit proof for the only production Python files changed by DAST and reliability remediation. Prior full hardened SAST proof remains required for unchanged production files.' > evidence/EVIDENCE_CHAIN.txt
+          printf '%s\n' 'Internal SAST delta evidence only; not independent penetration testing or production readiness.' > evidence/CLAIM_BOUNDARY.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-k-reliability-sast-delta-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
