@@ -1,0 +1,108 @@
+name: MUSITU Phase K artifact attestation proof
+
+on:
+  push:
+    branches:
+      - musitu-continuum-phase-k-artifact-attestation-proof
+    paths:
+      - '.github/workflows/musitu-phase-k-artifact-attestation-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+  attestations: write
+
+jobs:
+  attest-airgrid-bridge:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated execution branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Restore exact MUSITU AirGrid source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence dist
+          cat musitu-phase-j-source.b64.part-* > musitu-phase-j-source.tar.gz.b64
+          base64 -d musitu-phase-j-source.tar.gz.b64 > musitu-phase-j-source.tar.gz
+          sha256sum -c MUSITU_PHASE_J_SOURCE_SHA256.txt
+          tar -xzf musitu-phase-j-source.tar.gz
+          sha256sum -c MUSITU_PHASE_J_SOURCE_FILES_SHA256.txt
+          printf '%s  %s\n' '50e3e1a6a78d3096f4c68697c737040ce92be6a1fed579d785ff2f018dafdf0c' 'airgrid/transport/local-libp2p/transport.go' | sha256sum -c -
+          printf '%s  %s\n' '802dd4f08ff967543a03d6d7647a3f49db721e57c1d3713d3cf7347712699c82' 'airgrid/transport/local-libp2p/cmd/musitu-airgrid-bridge/main.go' | sha256sum -c -
+          printf '%s\n' '63d50f79d5aafdd1a82a44e3c7104c91dcbb3284' > evidence/CANONICAL_CHECKPOINT.txt
+          printf '%s\n' '5d01c65e8bfe95060ce680f538d679d7fe7c14f2' > evidence/CANONICAL_TREE.txt
+          printf '%s\n' "${GITHUB_SHA}" > evidence/GITHUB_EXECUTION_COMMIT.txt
+
+      - name: Install Go 1.27.1
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Apply exact admitted Go security locks and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd airgrid/transport/local-libp2p
+          go get github.com/pion/dtls/v3@v3.1.4 github.com/pion/stun/v3@v3.1.5 golang.org/x/crypto@v0.56.0
+          go mod tidy
+          printf '%s  %s\n' 'a76f8f678701089cf1e3335939d85032fbadbafb1309cccaa8b2e4b9a645d04b' 'go.mod' | sha256sum -c -
+          printf '%s  %s\n' 'be2e8c598b2277d8075cec7ade1506bc92f97bc3560ab956b664bbc5bcd59fbd' 'go.sum' | sha256sum -c -
+          go test ./... -v | tee "${GITHUB_WORKSPACE}/evidence/go-test.log"
+          go version | tee "${GITHUB_WORKSPACE}/evidence/go-version.txt"
+
+      - name: Build bridge twice and require reproducible bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          module="$PWD/airgrid/transport/local-libp2p"
+          CGO_ENABLED=0 go -C "$module" build -trimpath -buildvcs=false -ldflags='-buildid=' -o "$PWD/dist/musitu-airgrid-bridge-a" ./cmd/musitu-airgrid-bridge
+          CGO_ENABLED=0 go -C "$module" build -trimpath -buildvcs=false -ldflags='-buildid=' -o "$PWD/dist/musitu-airgrid-bridge-b" ./cmd/musitu-airgrid-bridge
+          cmp dist/musitu-airgrid-bridge-a dist/musitu-airgrid-bridge-b
+          mv dist/musitu-airgrid-bridge-a dist/musitu-airgrid-bridge
+          rm dist/musitu-airgrid-bridge-b
+          sha256sum dist/musitu-airgrid-bridge | tee evidence/bridge-sha256.txt
+          file dist/musitu-airgrid-bridge | tee evidence/bridge-file.txt
+          printf '%s\n' 'REPRODUCIBLE_BUILD_PASS' > evidence/reproducible-build-status.txt
+
+      - name: Generate Sigstore-backed GitHub build provenance attestation
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: dist/musitu-airgrid-bridge
+
+      - name: Preserve and verify attestation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          set -euo pipefail
+          test -n "$ATTESTATION_BUNDLE"
+          test -s "$ATTESTATION_BUNDLE"
+          cp "$ATTESTATION_BUNDLE" evidence/attestation-bundle.jsonl
+          printf '%s\n' "$ATTESTATION_ID" > evidence/attestation-id.txt
+          printf '%s\n' "$ATTESTATION_URL" > evidence/attestation-url.txt
+          gh --version > evidence/gh-version.txt
+          gh attestation verify dist/musitu-airgrid-bridge -R "${GITHUB_REPOSITORY}" --format json > evidence/attestation-verify.json
+          test -s evidence/attestation-verify.json
+          printf '%s\n' 'ATTESTATION_VERIFY_PASS' > evidence/attestation-verify-status.txt
+          printf '%s\n' 'Internal build-provenance attestation for the exact current MUSITU AirGrid bridge only. This is not a complete production release-signing policy, independent security review, production readiness certification, or RF evidence.' > evidence/CLAIM_BOUNDARY.txt
+          sha256sum evidence/* dist/musitu-airgrid-bridge > evidence/EVIDENCE_SHA256.txt
+
+      - name: Upload attested bridge and evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-k-artifact-attestation-${{ github.run_id }}
+          path: |
+            dist/musitu-airgrid-bridge
+            evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
