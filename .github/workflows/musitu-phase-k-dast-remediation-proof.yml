@@ -1,0 +1,139 @@
+name: MUSITU Phase K DAST remediation proof
+
+on:
+  push:
+    branches:
+      - musitu-continuum-phase-k-dast-remediation-proof-v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sast-and-dast:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated proof branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Reconstruct admitted hardened candidate and apply exact remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/source evidence-sast evidence-dast
+          cat phase-k-sast-proof/source.b64.part-* > work/source.tar.gz.b64
+          base64 -d work/source.tar.gz.b64 > work/source.tar.gz
+          printf '%s  %s\n' 'bb4642bca554ee1a5ac22d605aa77114508e90ea5c133364b95b85cc336c964c' 'work/source.tar.gz' | sha256sum -c -
+          tar -xzf work/source.tar.gz -C work/source
+          (cd work/source && sha256sum -c ../../phase-k-sast-proof/SOURCE_FILES_SHA256.txt)
+          test "$(find work/source -type f -name '*.py' | wc -l)" -eq 44
+          test "$(find work/source -type f | wc -l)" -eq 44
+
+          cat phase-k-sast-hardening/python-patch.b64.part-* > work/python-hardening.patch.b64
+          base64 -d work/python-hardening.patch.b64 > work/python-hardening.patch
+          printf '%s  %s\n' '6a63443bb44a9051207bf2bc6dca6974cce366b324992dab9afc26347ba73f59' 'work/python-hardening.patch' | sha256sum -c -
+          (cd work/source && patch -p1 < ../python-hardening.patch)
+          (cd work/source && sha256sum -c ../../phase-k-sast-hardening/CANDIDATE_SOURCE_FILES_SHA256.txt)
+
+          printf '%s  %s\n' 'e371091d43955d0a6b43c2159829a37638e875b19383375219e2b79a8af7e0ce' 'phase-k-dast-remediation-proof/dast-remediation.patch' | sha256sum -c -
+          (cd work/source && patch -p1 < ../../phase-k-dast-remediation-proof/dast-remediation.patch)
+          (cd work/source && sha256sum -c ../../phase-k-dast-remediation-proof/production-current.sha256)
+          (cd work/source && sha256sum -c ../../phase-k-dast-remediation-proof/dast-targets-current.sha256)
+          mkdir -p work/source/scripts
+          cat phase-k-dast-remediation-proof/harness.b64.part-* > work/phase_k_dast_harness.py.b64
+          base64 -d work/phase_k_dast_harness.py.b64 > work/source/scripts/phase_k_dast_harness.py
+          printf '%s  %s\n' '6f3ae6527d927e69444be92755b63fad8dc0d261843eef91942f96559ea91b1e' 'work/source/scripts/phase_k_dast_harness.py' | sha256sum -c -
+          chmod +x work/source/scripts/phase_k_dast_harness.py
+
+          printf '%s\n' 'd7dbaac044a0eb038297d3af18667e6e960607f8' > evidence-sast/SEALED_SOURCE_ORIGINAL_COMMIT.txt
+          printf '%s\n' '2dc487c52c8a9110887f0b611814e599db3affb8' > evidence-sast/SEALED_SOURCE_TREE.txt
+          printf '%s\n' "${GITHUB_SHA}" > evidence-sast/GITHUB_EXECUTION_COMMIT.txt
+          sha256sum phase-k-dast-remediation-proof/dast-remediation.patch phase-k-dast-remediation-proof/production-current.sha256 phase-k-dast-remediation-proof/dast-targets-current.sha256 work/source/scripts/phase_k_dast_harness.py > evidence-sast/PROOF_INPUTS_SHA256.txt
+
+      - name: Install pinned Bandit scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version | tee evidence-sast/python-version.txt
+          python3 -m pip install --disable-pip-version-check 'bandit==1.9.4'
+          bandit --version | tee evidence-sast/bandit-version.txt
+
+      - name: Fresh production Python SAST after source drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t production_paths < <(awk '{print $2}' phase-k-dast-remediation-proof/production-current.sha256)
+          test "${#production_paths[@]}" -eq 23
+          args=()
+          for p in "${production_paths[@]}"; do args+=("work/source/$p"); done
+          set +e
+          bandit -f json -o evidence-sast/bandit-production.json "${args[@]}"
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > evidence-sast/bandit-exit-code.txt
+          test -s evidence-sast/bandit-production.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('evidence-sast/bandit-production.json').read_text(encoding='utf-8'))
+          results = report.get('results', [])
+          severity = {}
+          for item in results:
+              key = item.get('issue_severity', 'UNKNOWN').upper()
+              severity[key] = severity.get(key, 0) + 1
+          summary = {
+              'production_file_count': 23,
+              'results': len(results),
+              'severity': dict(sorted(severity.items())),
+              'errors': report.get('errors', []),
+              'high_medium': severity.get('HIGH', 0) + severity.get('MEDIUM', 0),
+          }
+          Path('evidence-sast/bandit-production-summary.json').write_text(json.dumps(summary, indent=2, sort_keys=True)+'\n', encoding='utf-8')
+          print(json.dumps(summary, sort_keys=True))
+          if summary['errors'] or summary['high_medium']:
+              raise SystemExit(2)
+          PY
+          cp phase-k-dast-remediation-proof/production-current.sha256 evidence-sast/PRODUCTION_SOURCE_FILES_SHA256.txt
+          printf '%s\n' 'Fresh production-Python SAST after DAST remediation source drift. This does not satisfy DAST, independent penetration testing, DPIA, telecom regulatory gates, signed builds, mobile security, Guardian residual controls, Rust disposition, or production readiness.' > evidence-sast/CLAIM_BOUNDARY.txt
+          sha256sum evidence-sast/* > evidence-sast/EVIDENCE_SHA256.txt
+
+      - name: Run bounded internal active DAST against remediated services
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd work/source && python3 scripts/phase_k_dast_harness.py --scan --work-dir "$GITHUB_WORKSPACE/evidence-dast")
+          printf '%s\n' "${GITHUB_SHA}" > evidence-dast/GITHUB_EXECUTION_COMMIT.txt
+          printf '%s\n' 'd7dbaac044a0eb038297d3af18667e6e960607f8' > evidence-dast/SEALED_SOURCE_ORIGINAL_COMMIT.txt
+          printf '%s\n' '2dc487c52c8a9110887f0b611814e599db3affb8' > evidence-dast/SEALED_SOURCE_TREE.txt
+          sha256sum phase-k-dast-remediation-proof/dast-remediation.patch > evidence-dast/DAST_REMEDIATION_PATCH_SHA256.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          summary=json.loads(Path('evidence-dast/zap-summary.json').read_text(encoding='utf-8'))
+          high_medium=sum(v.get('risk_counts',{}).get('HIGH',0)+v.get('risk_counts',{}).get('MEDIUM',0) for v in summary.values())
+          if high_medium:
+              raise SystemExit(2)
+          PY
+          rm -f evidence-dast/EVIDENCE_SHA256.txt
+          find evidence-dast -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > evidence-dast/EVIDENCE_SHA256.txt
+
+      - name: Upload fresh production SAST evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-k-dast-remediation-sast-${{ github.run_id }}
+          path: evidence-sast/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+      - name: Upload post-remediation DAST evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: musitu-phase-k-dast-remediation-dast-${{ github.run_id }}
+          path: evidence-dast/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 90
