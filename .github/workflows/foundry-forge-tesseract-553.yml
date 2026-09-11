@@ -69,6 +69,11 @@ jobs:
             case "$base" in
               libc.so.6|libm.so.6) continue ;;
             esac
+            # libtesseract is already installed under PREFIX/lib. Never copy an
+            # already-bundled dependency onto itself; only import external bytes.
+            if [[ "$lib" == "$PREFIX/lib/"* ]]; then
+              continue
+            fi
             cp -L "$lib" "$PREFIX/lib/$base"
           done
           patchelf --set-rpath '$ORIGIN/../lib' "$PREFIX/bin/tesseract"
@@ -128,7 +133,7 @@ jobs:
 
           cd "$GITHUB_WORKSPACE"
           python3 - <<'PY'
-          import hashlib, json, pathlib, platform, subprocess
+          import hashlib, json, pathlib, platform
           root=pathlib.Path('tesseract_qualification'); runtime=root/'runtime'
           binary=runtime/'bin/tesseract'; eng=runtime/'share/tessdata/eng.traineddata'
           def sha(p):
