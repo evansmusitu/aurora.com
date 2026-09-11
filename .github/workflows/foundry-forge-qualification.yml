@@ -40,10 +40,13 @@ jobs:
           rm -rf qualification
           mkdir -p qualification/wheels qualification/extracted/cryptography qualification/extracted/pypdf qualification/extracted/pypdfium2
 
+          # The handoff pins the cp39 ABI3 wheel specifically. Acquire against the
+          # minimum compatible CPython tag, then execute that exact ABI3 wheel on
+          # the target CPython 3.12.13 runtime below.
           python -m pip download 'cryptography==50.0.1' \
             --only-binary=:all: --no-deps \
             --platform manylinux_2_34_x86_64 \
-            --python-version 3.12 --implementation cp --abi abi3 \
+            --python-version 3.9 --implementation cp --abi abi3 \
             --dest qualification/wheels
 
           python -m pip download 'pypdf==6.18.0' \
