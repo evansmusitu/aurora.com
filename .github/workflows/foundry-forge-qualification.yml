@@ -40,31 +40,19 @@ jobs:
           rm -rf qualification
           mkdir -p qualification/wheels qualification/extracted/cryptography qualification/extracted/pypdf qualification/extracted/pypdfium2
 
-          # The handoff pins the cp39 ABI3 wheel specifically. Acquire against the
-          # minimum compatible CPython tag, then execute that exact ABI3 wheel on
-          # the target CPython 3.12.13 runtime below.
-          python -m pip download 'cryptography==50.0.1' \
-            --only-binary=:all: --no-deps \
-            --platform manylinux_2_34_x86_64 \
-            --python-version 3.9 --implementation cp --abi abi3 \
-            --dest qualification/wheels
-
-          python -m pip download 'pypdf==6.18.0' \
-            --only-binary=:all: --no-deps \
-            --dest qualification/wheels
-
-          python -m pip download 'pypdfium2==5.13.0' \
-            --only-binary=:all: --no-deps \
-            --platform manylinux2014_x86_64 \
-            --python-version 3.12 --implementation cp \
-            --dest qualification/wheels
-
           CRYPTO='qualification/wheels/cryptography-50.0.1-cp39-abi3-manylinux_2_34_x86_64.whl'
           PYPDF='qualification/wheels/pypdf-6.18.0-py3-none-any.whl'
           PDFIUM='qualification/wheels/pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl'
-          test -f "$CRYPTO"
-          test -f "$PYPDF"
-          test -f "$PDFIUM"
+
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://files.pythonhosted.org/packages/8c/eb/5d7124083e8d8cda8f5b348f544b71ad6f707ad63193758ef4d8e569da02/cryptography-50.0.1-cp39-abi3-manylinux_2_34_x86_64.whl' \
+            --output "$CRYPTO"
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://files.pythonhosted.org/packages/c7/a5/d5922a078c9a612327681d4793404f82998f4d66213add6fdc0659245856/pypdf-6.18.0-py3-none-any.whl' \
+            --output "$PYPDF"
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://files.pythonhosted.org/packages/d3/7c/74a2fb48e5b0d2402d9ca64b39074c722d67e9a8a2c58449a843a8c2329a/pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl' \
+            --output "$PDFIUM"
 
           printf '%s  %s\n' '9dde0a357190eb3b1da1bb9ab750e9c85cba82ca5977aa0836cbb94e92611239' "$CRYPTO" | sha256sum -c -
           printf '%s  %s\n' '05b762b77bcb9dcb4a7c91fcf5dded585b25bee7269ab3d3001d7c55fa1b324b' "$PYPDF" | sha256sum -c -
@@ -168,6 +156,7 @@ jobs:
           PY
 
       - name: Upload exact wheel bytes and receipt
+        if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: foundry-forge-python-dependency-qualification
