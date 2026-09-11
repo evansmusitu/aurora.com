@@ -1,0 +1,46 @@
+name: Foundry Forge CPython 3.12.13 runtime export
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - foundry-forge-qualification-20260911
+    paths:
+      - .github/workflows/foundry-forge-cpython-31213-runtime.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export-runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Setup exact CPython 3.12.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12.13'
+          check-latest: false
+      - name: Seal runtime bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(python -c 'import platform; print(platform.python_version())')" = '3.12.13'
+          test "$(python -c 'import platform; print(platform.machine())')" = 'x86_64'
+          ROOT="$PWD/cpython_runtime"
+          mkdir -p "$ROOT/evidence"
+          printf '%s\n' "$pythonLocation" > "$ROOT/evidence/source_prefix.txt"
+          python -VV > "$ROOT/evidence/python.version.txt" 2>&1
+          python - <<'PY' > "$ROOT/evidence/platform.json"
+          import json,platform
+          print(json.dumps({'python':platform.python_version(),'implementation':platform.python_implementation(),'machine':platform.machine(),'platform':platform.platform(),'libc':platform.libc_ver()},sort_keys=True))
+          PY
+          ldd "$pythonLocation/bin/python3.12" > "$ROOT/evidence/python.ldd.txt"
+          tar -C "$pythonLocation" -czf "$ROOT/cpython-3.12.13-ubuntu24.04-x86_64-runtime.tar.gz" .
+          sha256sum "$ROOT/cpython-3.12.13-ubuntu24.04-x86_64-runtime.tar.gz" > "$ROOT/cpython-3.12.13-ubuntu24.04-x86_64-runtime.tar.gz.sha256"
+      - name: Upload exact runtime
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: foundry-forge-cpython-3.12.13-runtime
+          path: cpython_runtime/
+          if-no-files-found: error
+          retention-days: 30
