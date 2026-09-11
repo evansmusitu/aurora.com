@@ -1,0 +1,208 @@
+name: Foundry Forge V9 product OCR path qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - foundry-forge-qualification-20260911
+    paths:
+      - qualification/foundry_forge_v9_manual_ocr.py
+      - .github/workflows/foundry-forge-v9-product-ocr-qualification.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  qualify-product-ocr-path:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated qualification source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: foundry-forge-qualification-20260911
+          persist-credentials: false
+
+      - name: Setup exact CPython 3.12.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12.13'
+          check-latest: false
+
+      - name: Qualify actual renderer to OCR engine path
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/product_ocr_qualification"
+          mkdir -p "$ROOT/wheels" "$ROOT/site" "$ROOT/native" "$ROOT/evidence"
+
+          python - <<'PY'
+          import platform,sys
+          assert sys.version_info[:3] == (3,12,13), sys.version
+          assert platform.machine() == 'x86_64', platform.machine()
+          libc,version=platform.libc_ver(); assert libc=='glibc'; assert tuple(map(int,version.split('.')[:2])) >= (2,34)
+          print('target_runtime=PASS', platform.python_version(), platform.machine(), libc, version)
+          PY
+
+          PDFIUM="$ROOT/wheels/pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+          PILLOW="$ROOT/wheels/pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://files.pythonhosted.org/packages/d3/7c/74a2fb48e5b0d2402d9ca64b39074c722d67e9a8a2c58449a843a8c2329a/pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl' \
+            -o "$PDFIUM"
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://files.pythonhosted.org/packages/84/21/a35af28dcc61f37ed850a2d64c65c701321dfbf25085e469d5559360cbbf/pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl' \
+            -o "$PILLOW"
+          printf '%s  %s\n' '81df25c1ab4c13ff773102d3cbea1967511d079123b067fc077bd0c4d57d91d8' "$PDFIUM" | sha256sum -c -
+          printf '%s  %s\n' '78cb2c6865a35ab8ff8b75fd122f6033b92a62c82801110e48ddd6c936a45d91' "$PILLOW" | sha256sum -c -
+          python -m pip install --disable-pip-version-check --no-deps --no-compile --target "$ROOT/site" "$PDFIUM" "$PILLOW"
+
+          ARTZIP="$ROOT/native/tesseract-v2-artifact.zip"
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            'https://api.github.com/repos/evansmusitu/aurora.com/actions/artifacts/10273751092/zip' \
+            -o "$ARTZIP"
+          test "$(sha256sum "$ARTZIP" | awk '{print $1}')" = 'd981762ce2055012f6784d7c9fcaed88601234901c2f84a61d225862a81fab17'
+          unzip -tq "$ARTZIP"
+          unzip -q "$ARTZIP" -d "$ROOT/native/artifact"
+          TAR="$ROOT/native/artifact/TESSERACT_5_5_3_LINUX_X86_64_RUNTIME.tar.gz"
+          test "$(sha256sum "$TAR" | awk '{print $1}')" = 'f8e1aa0d4b7b68ca2ec0e3517ffdef160ad4f7e3ed9b44211d38492ba38f83f8'
+          mkdir -p "$ROOT/native/runtime_extract"
+          tar -xzf "$TAR" -C "$ROOT/native/runtime_extract"
+          RUNTIME="$ROOT/native/runtime_extract/runtime"
+          test "$(sha256sum "$RUNTIME/bin/tesseract" | awk '{print $1}')" = '8d20fd20945b9080b6c797d08e64b9e0437e16d21f47714a840a4d514d08276c'
+          test "$(sha256sum "$RUNTIME/share/tessdata/eng.traineddata" | awk '{print $1}')" = '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2'
+
+          export PYTHONPATH="$PWD/qualification:$ROOT/site"
+          export PATH="$RUNTIME/bin:$PATH"
+          export LD_LIBRARY_PATH="$RUNTIME/lib"
+          export TESSDATA_PREFIX="$RUNTIME/share/tessdata"
+          export PYTHONDONTWRITEBYTECODE=1
+
+          python - "$ROOT" <<'PY'
+          import hashlib, importlib.metadata, json, os, pathlib, platform, sys
+          from PIL import Image, ImageDraw, ImageFont
+          import foundry_forge_v9_manual_ocr as ocr
+
+          root=pathlib.Path(sys.argv[1])
+          assert platform.python_version()=='3.12.13'
+          assert importlib.metadata.version('pypdfium2')=='5.13.0'
+          assert importlib.metadata.version('Pillow')=='12.3.0'
+
+          # Build an image-only synthetic service-manual page. There is no PDF text
+          # layer, so success requires the real PdfiumRenderer -> TesseractCliEngine path.
+          image=Image.new('RGB',(1800,520),'white')
+          draw=ImageDraw.Draw(image)
+          font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',58)
+          lines=[
+              'MUSITU FORGE OCR QUALIFICATION PROBE',
+              'ERROR 07 BATTERY COMMUNICATION LOSS',
+              'INSPECT BMS COMMUNICATION CABLE',
+          ]
+          y=80
+          for line in lines:
+              draw.text((80,y),line,font=font,fill='black')
+              y += 125
+          pdf=root/'synthetic_scanned_manual.pdf'
+          image.save(pdf,'PDF',resolution=250.0)
+          source_sha=hashlib.sha256(pdf.read_bytes()).hexdigest()
+
+          renderer=ocr.PdfiumRenderer()
+          engine=ocr.TesseractCliEngine(str(pathlib.Path(os.environ['PATH'].split(':')[0])/'tesseract'))
+          runtime=ocr.identify_runtime(renderer,engine)
+          assert renderer.version=='5.13.0', renderer.version
+          assert engine.version=='5.5.3', engine.version
+          assert engine.binary_sha256=='8d20fd20945b9080b6c797d08e64b9e0437e16d21f47714a840a4d514d08276c'
+          assert runtime.qualified is True, runtime
+
+          result=ocr.ocr_manual_pdf_pages(
+              pdf, source_sha, [1], renderer=renderer, engine=engine,
+              require_qualified_runtime=True, min_mean_confidence=80.0,
+          )
+          assert result.runtime.qualified is True
+          assert len(result.pages)==1
+          page=result.pages[0]
+          assert page.status=='OCR_EXTRACTED', page
+          upper=page.text.upper()
+          for token in ('MUSITU','FORGE','QUALIFICATION','BATTERY','COMMUNICATION'):
+              assert token in upper, (token,page.text)
+          assert page.mean_confidence is not None and page.mean_confidence >= 80.0
+
+          source_file=pathlib.Path('qualification/foundry_forge_v9_manual_ocr.py')
+          report={
+              'schema':'musitu.foundry_forge.v9_product_ocr_qualification.v1',
+              'pass':True,
+              'target_runtime':{
+                  'python':platform.python_version(),
+                  'machine':platform.machine(),
+                  'libc':platform.libc_ver()[0],
+                  'libc_version':platform.libc_ver()[1],
+              },
+              'source':{
+                  'qualification_source_path':str(source_file),
+                  'qualification_source_sha256':hashlib.sha256(source_file.read_bytes()).hexdigest(),
+                  'authoritative_origin':'MFT_D10_COMMERCIAL_HARDENING_V8.patch / core/forge1/manual_ocr.py',
+                  'v9_delta':'forward existing LD_LIBRARY_PATH into Tesseract subprocess environments',
+                  'stable_hash_harness_shim_used_by_qualification_path':False,
+              },
+              'python_dependencies':{
+                  'pypdfium2':{'version':'5.13.0','wheel_sha256':'81df25c1ab4c13ff773102d3cbea1967511d079123b067fc077bd0c4d57d91d8'},
+                  'Pillow':{'version':'12.3.0','wheel_sha256':'78cb2c6865a35ab8ff8b75fd122f6033b92a62c82801110e48ddd6c936a45d91'},
+              },
+              'native_dependency':{
+                  'artifact_id':10273751092,
+                  'artifact_sha256':'d981762ce2055012f6784d7c9fcaed88601234901c2f84a61d225862a81fab17',
+                  'runtime_tar_sha256':'f8e1aa0d4b7b68ca2ec0e3517ffdef160ad4f7e3ed9b44211d38492ba38f83f8',
+                  'tesseract_version':engine.version,
+                  'tesseract_binary_sha256':engine.binary_sha256,
+                  'eng_sha256':'7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2',
+              },
+              'product_path':{
+                  'renderer':runtime.renderer,
+                  'renderer_version':runtime.renderer_version,
+                  'renderer_qualified':runtime.renderer_qualified,
+                  'ocr_engine':runtime.ocr_engine,
+                  'ocr_engine_version':runtime.ocr_engine_version,
+                  'ocr_engine_qualified':runtime.ocr_engine_qualified,
+                  'runtime_qualified':runtime.qualified,
+                  'probe_pdf_sha256':source_sha,
+                  'page_status':page.status,
+                  'ocr_text':page.text,
+                  'mean_confidence':page.mean_confidence,
+                  'word_count':page.word_count,
+                  'rendered_image_sha256':page.image_sha256,
+              },
+              'checks':{
+                  'exact_cpython_3_12_13':'PASS',
+                  'exact_pypdfium2_5_13_0':'PASS',
+                  'exact_pillow_12_3_0':'PASS',
+                  'exact_tesseract_5_5_3':'PASS',
+                  'product_runtime_identity_qualified':'PASS',
+                  'real_pdfium_render':'PASS',
+                  'real_tesseract_ocr':'PASS',
+                  'bounded_ocr_extraction':'PASS',
+              },
+              'truth_boundary':{
+                  'product_ocr_path_qualified_on_target_runtime':True,
+                  'qualified_dependency_bytes_complete':False,
+                  'target_cpython312_fully_qualified':False,
+                  'production_authorized':False,
+                  'commercial_candidate_sealed':False,
+              },
+          }
+          out=root/'evidence/V9_PRODUCT_OCR_QUALIFICATION_CP31213.json'
+          out.write_text(json.dumps(report,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          print(json.dumps(report,indent=2,sort_keys=True))
+          PY
+
+      - name: Upload product OCR qualification evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: foundry-forge-v9-product-ocr-qualification
+          path: product_ocr_qualification/evidence/V9_PRODUCT_OCR_QUALIFICATION_CP31213.json
+          if-no-files-found: error
+          retention-days: 30
