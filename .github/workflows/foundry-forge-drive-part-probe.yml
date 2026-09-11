@@ -1,0 +1,29 @@
+name: Foundry Forge authoritative Drive transport probe
+
+on:
+  push:
+    branches:
+      - foundry-forge-qualification-20260911
+    paths:
+      - .github/workflows/foundry-forge-drive-part-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Probe exact authoritative part00 without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://drive.usercontent.google.com/download?id=1XubGE5ov0s9VaGoDlyJN3jL1a66udVfq&export=download&confirm=t'
+          curl --fail --location --retry 2 --silent --show-error "$URL" -o part00
+          size=$(stat -c '%s' part00)
+          sha=$(sha256sum part00 | awk '{print $1}')
+          printf 'size=%s\nsha256=%s\n' "$size" "$sha"
+          test "$size" = '33554432'
+          test "$sha" = '5aa349e032bf7c5dfa2daa95e04707f758181e20df2a6d581d7e86c097535121'
+          echo 'AUTHORITATIVE_DRIVE_PART00_ANONYMOUS_RETRIEVAL=PASS'
