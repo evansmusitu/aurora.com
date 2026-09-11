@@ -1,0 +1,152 @@
+name: Foundry Forge Tesseract 5.5.3 independent verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - foundry-forge-qualification-20260911
+    paths:
+      - .github/workflows/foundry-forge-tesseract-553-independent-verify.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-sealed-artifact:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Independently verify artifact bytes and relocated runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_OUTER='d981762ce2055012f6784d7c9fcaed88601234901c2f84a61d225862a81fab17'
+          ARTIFACT_ID='10273751092'
+          ROOT="$PWD/independent_verify"
+          mkdir -p "$ROOT"
+
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/evansmusitu/aurora.com/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o "$ROOT/artifact.zip"
+
+          actual_outer="$(sha256sum "$ROOT/artifact.zip" | awk '{print $1}')"
+          test "$actual_outer" = "$EXPECTED_OUTER"
+          unzip -tq "$ROOT/artifact.zip"
+          unzip -q "$ROOT/artifact.zip" -d "$ROOT/unpacked"
+
+          TAR="$ROOT/unpacked/TESSERACT_5_5_3_LINUX_X86_64_RUNTIME.tar.gz"
+          TARSHA="$TAR.sha256"
+          RECEIPT="$ROOT/unpacked/TESSERACT_5_5_3_QUALIFICATION.json"
+          test -f "$TAR"
+          test -f "$TARSHA"
+          test -f "$RECEIPT"
+          (cd "$(dirname "$TAR")" && sha256sum -c "$(basename "$TARSHA")")
+
+          mkdir -p "$ROOT/relocated"
+          tar -xzf "$TAR" -C "$ROOT/relocated"
+          RUNTIME="$ROOT/relocated/runtime"
+          EVIDENCE="$ROOT/relocated/evidence"
+          test -x "$RUNTIME/bin/tesseract"
+          test -f "$RUNTIME/share/tessdata/eng.traineddata"
+
+          TESSDATA_PREFIX="$RUNTIME/share/tessdata" LD_LIBRARY_PATH="$RUNTIME/lib" \
+            "$RUNTIME/bin/tesseract" --version | tee "$ROOT/relocated_version.txt"
+          test "$(head -n1 "$ROOT/relocated_version.txt")" = 'tesseract 5.5.3'
+          TESSDATA_PREFIX="$RUNTIME/share/tessdata" LD_LIBRARY_PATH="$RUNTIME/lib" \
+            "$RUNTIME/bin/tesseract" --list-langs | tee "$ROOT/relocated_langs.txt"
+          grep -qx 'eng' "$ROOT/relocated_langs.txt"
+
+          LD_LIBRARY_PATH="$RUNTIME/lib" ldd "$RUNTIME/bin/tesseract" | tee "$ROOT/relocated_ldd.txt"
+          python3 - "$RUNTIME" "$ROOT/relocated_ldd.txt" <<'PY'
+          import pathlib,re,sys
+          runtime=pathlib.Path(sys.argv[1]).resolve()
+          lines=pathlib.Path(sys.argv[2]).read_text().splitlines()
+          allowed={'libc.so.6','libm.so.6'}
+          failures=[]
+          for line in lines:
+              m=re.match(r'\s*(\S+)\s+=>\s+(\S+)', line)
+              if not m:
+                  continue
+              soname,target=m.groups()
+              if target=='not':
+                  failures.append(line); continue
+              if soname in allowed:
+                  continue
+              try:
+                  pathlib.Path(target).resolve().relative_to(runtime/'lib')
+              except ValueError:
+                  failures.append(line)
+          assert not failures, failures
+          print('relocated_non_glibc_dependency_closure=PASS')
+          PY
+
+          PROBE="$ROOT/unpacked/probe.png"
+          test -f "$PROBE"
+          TESSDATA_PREFIX="$RUNTIME/share/tessdata" LD_LIBRARY_PATH="$RUNTIME/lib" \
+            "$RUNTIME/bin/tesseract" "$PROBE" stdout --dpi 250 -l eng --psm 6 tsv \
+            > "$ROOT/independent_probe.tsv" 2> "$ROOT/independent_probe.stderr.txt"
+
+          python3 - "$ROOT" "$RECEIPT" "$RUNTIME" <<'PY'
+          import csv,hashlib,json,pathlib,platform,sys
+          root=pathlib.Path(sys.argv[1]); receipt_path=pathlib.Path(sys.argv[2]); runtime=pathlib.Path(sys.argv[3])
+          receipt=json.loads(receipt_path.read_text())
+          assert receipt['qualified'] is True
+          assert receipt['source']['commit_sha']=='db0ec62f81b0737fbbe184d8fea40af5738f8eef'
+          assert receipt['language_data']['sha256']=='7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2'
+          def sha(p):
+              h=hashlib.sha256()
+              with p.open('rb') as f:
+                  for chunk in iter(lambda:f.read(1024*1024),b''): h.update(chunk)
+              return h.hexdigest()
+          binary=runtime/'bin/tesseract'; eng=runtime/'share/tessdata/eng.traineddata'
+          assert sha(binary)==receipt['runtime']['binary_sha256']
+          assert sha(eng)==receipt['language_data']['sha256']
+          rows=list(csv.DictReader((root/'independent_probe.tsv').open(encoding='utf-8'),delimiter='\t'))
+          words=[]; conf=[]
+          for row in rows:
+              text=(row.get('text') or '').strip()
+              if not text: continue
+              words.append(text)
+              try: v=float(row.get('conf') or -1)
+              except ValueError: v=-1
+              if 0 <= v <= 100: conf.append(v)
+          text=' '.join(words); mean=sum(conf)/len(conf) if conf else 0.0
+          assert all(token in text.upper() for token in ('MUSITU','FORGE','QUALIFICATION')), text
+          assert mean >= 80.0, mean
+          report={
+            'schema':'musitu.foundry_forge.tesseract_independent_verification.v1',
+            'pass':True,
+            'source_artifact_id':10273751092,
+            'source_artifact_sha256':'d981762ce2055012f6784d7c9fcaed88601234901c2f84a61d225862a81fab17',
+            'runtime_tar_sha256':sha(root/'unpacked/TESSERACT_5_5_3_LINUX_X86_64_RUNTIME.tar.gz'),
+            'binary_sha256':sha(binary),
+            'eng_sha256':sha(eng),
+            'relocated_version':'tesseract 5.5.3',
+            'relocated_non_glibc_dependency_closure':'PASS',
+            'independent_ocr_probe':'PASS',
+            'independent_ocr_text':text,
+            'independent_ocr_mean_confidence':mean,
+            'truth_boundary':{
+              'native_artifact_independently_verified':True,
+              'qualified_dependency_bytes_complete':False,
+              'target_cpython312_fully_qualified':False,
+              'production_authorized':False
+            }
+          }
+          (root/'INDEPENDENT_TESSERACT_5_5_3_VERIFICATION.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(report,indent=2,sort_keys=True))
+          PY
+
+      - name: Upload independent verification receipt
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: foundry-forge-tesseract-5.5.3-independent-verification
+          path: independent_verify/INDEPENDENT_TESSERACT_5_5_3_VERIFICATION.json
+          if-no-files-found: error
+          retention-days: 30
