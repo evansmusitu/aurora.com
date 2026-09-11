@@ -45,12 +45,13 @@ jobs:
           test -f "$TAR"
           test -f "$TARSHA"
           test -f "$RECEIPT"
-          (cd "$(dirname "$TAR")" && sha256sum -c "$(basename "$TARSHA")")
+          expected_tar="$(awk '{print $1}' "$TARSHA")"
+          actual_tar="$(sha256sum "$TAR" | awk '{print $1}')"
+          test "$actual_tar" = "$expected_tar"
 
           mkdir -p "$ROOT/relocated"
           tar -xzf "$TAR" -C "$ROOT/relocated"
           RUNTIME="$ROOT/relocated/runtime"
-          EVIDENCE="$ROOT/relocated/evidence"
           test -x "$RUNTIME/bin/tesseract"
           test -f "$RUNTIME/share/tessdata/eng.traineddata"
 
@@ -91,9 +92,9 @@ jobs:
             "$RUNTIME/bin/tesseract" "$PROBE" stdout --dpi 250 -l eng --psm 6 tsv \
             > "$ROOT/independent_probe.tsv" 2> "$ROOT/independent_probe.stderr.txt"
 
-          python3 - "$ROOT" "$RECEIPT" "$RUNTIME" <<'PY'
-          import csv,hashlib,json,pathlib,platform,sys
-          root=pathlib.Path(sys.argv[1]); receipt_path=pathlib.Path(sys.argv[2]); runtime=pathlib.Path(sys.argv[3])
+          python3 - "$ROOT" "$RECEIPT" "$RUNTIME" "$actual_tar" <<'PY'
+          import csv,hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]); receipt_path=pathlib.Path(sys.argv[2]); runtime=pathlib.Path(sys.argv[3]); actual_tar=sys.argv[4]
           receipt=json.loads(receipt_path.read_text())
           assert receipt['qualified'] is True
           assert receipt['source']['commit_sha']=='db0ec62f81b0737fbbe184d8fea40af5738f8eef'
@@ -123,7 +124,7 @@ jobs:
             'pass':True,
             'source_artifact_id':10273751092,
             'source_artifact_sha256':'d981762ce2055012f6784d7c9fcaed88601234901c2f84a61d225862a81fab17',
-            'runtime_tar_sha256':sha(root/'unpacked/TESSERACT_5_5_3_LINUX_X86_64_RUNTIME.tar.gz'),
+            'runtime_tar_sha256':actual_tar,
             'binary_sha256':sha(binary),
             'eng_sha256':sha(eng),
             'relocated_version':'tesseract 5.5.3',
