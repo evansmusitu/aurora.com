@@ -54,21 +54,28 @@ jobs:
           mkdir -p qualification/wheels
           python -m pip install --disable-pip-version-check --upgrade pip
           python -m pip download --only-binary=:all: --no-deps -d qualification/wheels \
-            'cryptography==50.0.1' 'pypdf==6.18.0' 'pypdfium2==5.13.0'
+            'cryptography==50.0.1' 'pypdf==6.18.0' 'pypdfium2==5.13.0' \
+            'cffi==2.1.1' 'pycparser==3.0'
 
           CRYPTO='qualification/wheels/cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl'
           PYPDF='qualification/wheels/pypdf-6.18.0-py3-none-any.whl'
           PDFIUM='qualification/wheels/pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl'
+          CFFI='qualification/wheels/cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl'
+          PYCPARSER='qualification/wheels/pycparser-3.0-py3-none-any.whl'
           test -f "$CRYPTO"
           test -f "$PYPDF"
           test -f "$PDFIUM"
+          test -f "$CFFI"
+          test -f "$PYCPARSER"
           echo '51afcfceb15597cf2635068e4ac9a56b2abde622edde17f37d85fd7b5306497a  '"$CRYPTO" | sha256sum -c -
           echo '05b762b77bcb9dcb4a7c91fcf5dded585b25bee7269ab3d3001d7c55fa1b324b  '"$PYPDF" | sha256sum -c -
           echo '81df25c1ab4c13ff773102d3cbea1967511d079123b067fc077bd0c4d57d91d8  '"$PDFIUM" | sha256sum -c -
+          echo 'c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf  '"$CFFI" | sha256sum -c -
+          echo 'b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992  '"$PYCPARSER" | sha256sum -c -
           sha256sum qualification/wheels/* | sort > qualification/PYTHON_WHEEL_SHA256.txt
 
           python -m pip install --disable-pip-version-check --no-index --no-deps \
-            "$CRYPTO" "$PYPDF" "$PDFIUM"
+            "$PYCPARSER" "$CFFI" "$CRYPTO" "$PYPDF" "$PDFIUM"
 
       - name: Exercise Python dependency stack
         shell: bash
@@ -76,6 +83,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import json
+          import importlib.metadata
           import cryptography
           import pypdf
           import pypdfium2 as pdfium
@@ -85,8 +93,9 @@ jobs:
 
           assert cryptography.__version__ == '50.0.1', cryptography.__version__
           assert pypdf.__version__ == '6.18.0', pypdf.__version__
-          import importlib.metadata
           assert importlib.metadata.version('pypdfium2') == '5.13.0'
+          assert importlib.metadata.version('cffi') == '2.1.1'
+          assert importlib.metadata.version('pycparser') == '3.0'
 
           key = Ed25519PrivateKey.generate()
           msg = b'MUSITU_FOUNDRY_FORGE_CP31213_QUALIFICATION'
@@ -109,6 +118,8 @@ jobs:
               'cryptography': cryptography.__version__,
               'pypdf': pypdf.__version__,
               'pypdfium2': importlib.metadata.version('pypdfium2'),
+              'cffi': importlib.metadata.version('cffi'),
+              'pycparser': importlib.metadata.version('pycparser'),
               'openssl': openssl,
               'ed25519_sign_verify': 'PASS',
               'pypdf_write_pypdfium2_read': 'PASS',
@@ -190,7 +201,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import hashlib, json, pathlib, platform, subprocess, sys, importlib.metadata
+          import hashlib, json, pathlib, platform, importlib.metadata
           root = pathlib.Path('qualification')
           def sha(path):
               h = hashlib.sha256()
@@ -217,6 +228,8 @@ jobs:
                   'cryptography': importlib.metadata.version('cryptography'),
                   'pypdf': importlib.metadata.version('pypdf'),
                   'pypdfium2': importlib.metadata.version('pypdfium2'),
+                  'cffi': importlib.metadata.version('cffi'),
+                  'pycparser': importlib.metadata.version('pycparser'),
               },
               'tesseract': {
                   'version': '5.5.3',
