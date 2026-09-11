@@ -56,13 +56,13 @@ jobs:
           python -m pip download --only-binary=:all: --no-deps -d qualification/wheels \
             'cryptography==50.0.1' 'pypdf==6.18.0' 'pypdfium2==5.13.0'
 
-          CRYPTO='qualification/wheels/cryptography-50.0.1-cp39-abi3-manylinux_2_34_x86_64.whl'
+          CRYPTO='qualification/wheels/cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl'
           PYPDF='qualification/wheels/pypdf-6.18.0-py3-none-any.whl'
           PDFIUM='qualification/wheels/pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl'
           test -f "$CRYPTO"
           test -f "$PYPDF"
           test -f "$PDFIUM"
-          echo '9dde0a357190eb3b1da1bb9ab750e9c85cba82ca5977aa0836cbb94e92611239  '"$CRYPTO" | sha256sum -c -
+          echo '51afcfceb15597cf2635068e4ac9a56b2abde622edde17f37d85fd7b5306497a  '"$CRYPTO" | sha256sum -c -
           echo '05b762b77bcb9dcb4a7c91fcf5dded585b25bee7269ab3d3001d7c55fa1b324b  '"$PYPDF" | sha256sum -c -
           echo '81df25c1ab4c13ff773102d3cbea1967511d079123b067fc077bd0c4d57d91d8  '"$PDFIUM" | sha256sum -c -
           sha256sum qualification/wheels/* | sort > qualification/PYTHON_WHEEL_SHA256.txt
