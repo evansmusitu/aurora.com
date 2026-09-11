@@ -1,0 +1,271 @@
+name: Foundry Forge public dependency qualification
+
+on:
+  push:
+    branches:
+      - foundry-forge-qualification-20260911
+    paths:
+      - .github/workflows/foundry-forge-public-dependency-qualification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Set up exact CPython 3.12.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12.13'
+          architecture: x64
+          cache: ''
+
+      - name: Verify target platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p qualification
+          python - <<'PY'
+          import json, platform, sys
+          assert sys.version_info[:3] == (3, 12, 13), sys.version
+          assert platform.system() == 'Linux', platform.system()
+          assert platform.machine() == 'x86_64', platform.machine()
+          libc_name, libc_ver = platform.libc_ver()
+          assert libc_name == 'glibc', (libc_name, libc_ver)
+          major, minor = [int(x) for x in libc_ver.split('.')[:2]]
+          assert (major, minor) >= (2, 34), libc_ver
+          out = {
+              'python': platform.python_version(),
+              'implementation': platform.python_implementation(),
+              'system': platform.system(),
+              'machine': platform.machine(),
+              'libc': {'name': libc_name, 'version': libc_ver},
+          }
+          open('qualification/PLATFORM.json','w').write(json.dumps(out, indent=2, sort_keys=True) + '\n')
+          print(json.dumps(out, sort_keys=True))
+          PY
+
+      - name: Acquire and verify exact Python dependency bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p qualification/wheels
+          python -m pip install --disable-pip-version-check --upgrade pip
+          python -m pip download --only-binary=:all: --no-deps -d qualification/wheels \
+            'cryptography==50.0.1' 'pypdf==6.18.0' 'pypdfium2==5.13.0'
+
+          CRYPTO='qualification/wheels/cryptography-50.0.1-cp39-abi3-manylinux_2_34_x86_64.whl'
+          PYPDF='qualification/wheels/pypdf-6.18.0-py3-none-any.whl'
+          PDFIUM='qualification/wheels/pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl'
+          test -f "$CRYPTO"
+          test -f "$PYPDF"
+          test -f "$PDFIUM"
+          echo '9dde0a357190eb3b1da1bb9ab750e9c85cba82ca5977aa0836cbb94e92611239  '"$CRYPTO" | sha256sum -c -
+          echo '05b762b77bcb9dcb4a7c91fcf5dded585b25bee7269ab3d3001d7c55fa1b324b  '"$PYPDF" | sha256sum -c -
+          echo '81df25c1ab4c13ff773102d3cbea1967511d079123b067fc077bd0c4d57d91d8  '"$PDFIUM" | sha256sum -c -
+          sha256sum qualification/wheels/* | sort > qualification/PYTHON_WHEEL_SHA256.txt
+
+          python -m pip install --disable-pip-version-check --no-index --no-deps \
+            "$CRYPTO" "$PYPDF" "$PDFIUM"
+
+      - name: Exercise Python dependency stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import cryptography
+          import pypdf
+          import pypdfium2 as pdfium
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from cryptography.hazmat.backends.openssl.backend import backend
+          from pypdf import PdfWriter
+
+          assert cryptography.__version__ == '50.0.1', cryptography.__version__
+          assert pypdf.__version__ == '6.18.0', pypdf.__version__
+          import importlib.metadata
+          assert importlib.metadata.version('pypdfium2') == '5.13.0'
+
+          key = Ed25519PrivateKey.generate()
+          msg = b'MUSITU_FOUNDRY_FORGE_CP31213_QUALIFICATION'
+          sig = key.sign(msg)
+          key.public_key().verify(sig, msg)
+
+          openssl = backend.openssl_version_text()
+          assert openssl.startswith('OpenSSL 4.0.2 '), openssl
+
+          writer = PdfWriter()
+          writer.add_blank_page(width=72, height=72)
+          with open('qualification/pypdf-smoke.pdf', 'wb') as f:
+              writer.write(f)
+          doc = pdfium.PdfDocument('qualification/pypdf-smoke.pdf')
+          assert len(doc) == 1
+          size = tuple(float(x) for x in doc[0].get_size())
+          assert size == (72.0, 72.0), size
+
+          out = {
+              'cryptography': cryptography.__version__,
+              'pypdf': pypdf.__version__,
+              'pypdfium2': importlib.metadata.version('pypdfium2'),
+              'openssl': openssl,
+              'ed25519_sign_verify': 'PASS',
+              'pypdf_write_pypdfium2_read': 'PASS',
+              'pdf_page_size': size,
+          }
+          open('qualification/PYTHON_RUNTIME_SMOKE.json','w').write(json.dumps(out, indent=2, sort_keys=True) + '\n')
+          print(json.dumps(out, sort_keys=True))
+          PY
+
+      - name: Build exact Tesseract 5.5.3 and pin language data
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake libtool pkg-config make g++ ca-certificates curl git \
+            libleptonica-dev libpng-dev libjpeg-dev libtiff-dev zlib1g-dev \
+            libwebp-dev libopenjp2-7-dev libcairo2-dev libpango1.0-dev \
+            libicu-dev libarchive-dev libcurl4-openssl-dev librsvg2-bin fonts-dejavu-core
+          dpkg-query -W -f='${Package}\t${Version}\n' \
+            libleptonica-dev libpng-dev libjpeg-dev libtiff-dev zlib1g-dev \
+            libwebp-dev libopenjp2-7-dev libcairo2-dev libpango1.0-dev \
+            libicu-dev libarchive-dev libcurl4-openssl-dev librsvg2-bin fonts-dejavu-core \
+            | sort > qualification/BUILD_DEPENDENCIES.tsv
+
+          git init qualification/tesseract-src
+          git -C qualification/tesseract-src remote add origin https://github.com/tesseract-ocr/tesseract.git
+          git -C qualification/tesseract-src fetch --depth 1 origin refs/tags/5.5.3:refs/tags/5.5.3
+          TAG_OBJECT=$(git -C qualification/tesseract-src rev-parse 'refs/tags/5.5.3^{tag}')
+          COMMIT=$(git -C qualification/tesseract-src rev-parse 'refs/tags/5.5.3^{commit}')
+          test "$TAG_OBJECT" = '6951ffe10ce031374bcd04fe400811da1e7e04ad'
+          test "$COMMIT" = 'db0ec62f81b0737fbbe184d8fea40af5738f8eef'
+          git -C qualification/tesseract-src checkout --detach "$COMMIT"
+          printf 'tag_object_sha=%s\ncommit_sha=%s\n' "$TAG_OBJECT" "$COMMIT" > qualification/TESSERACT_SOURCE_IDENTITY.txt
+
+          pushd qualification/tesseract-src
+          ./autogen.sh
+          ./configure --prefix="$GITHUB_WORKSPACE/qualification/tesseract-5.5.3"
+          make -j2
+          make install
+          popd
+
+          export PATH="$GITHUB_WORKSPACE/qualification/tesseract-5.5.3/bin:$PATH"
+          tesseract --version | tee qualification/TESSERACT_VERSION.txt
+          head -n1 qualification/TESSERACT_VERSION.txt | grep -Fx 'tesseract 5.5.3'
+
+          mkdir -p qualification/tessdata
+          TESSDATA_COMMIT='87416418657359cb625c412a48b6e1d6d41c29bd'
+          for lang in eng osd; do
+            curl --fail --location --retry 3 \
+              "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/${TESSDATA_COMMIT}/${lang}.traineddata" \
+              -o "qualification/tessdata/${lang}.traineddata"
+          done
+          sha256sum qualification/tessdata/*.traineddata | sort > qualification/TESSDATA_SHA256.txt
+          printf '%s\n' "$TESSDATA_COMMIT" > qualification/TESSDATA_UPSTREAM_COMMIT.txt
+
+          TESSDATA_PREFIX="$GITHUB_WORKSPACE/qualification/tessdata" tesseract --list-langs \
+            | tee qualification/TESSERACT_LANGS.txt
+          grep -Fx 'eng' qualification/TESSERACT_LANGS.txt
+          grep -Fx 'osd' qualification/TESSERACT_LANGS.txt
+
+          cat > qualification/ocr-smoke.svg <<'SVG'
+          <svg xmlns="http://www.w3.org/2000/svg" width="900" height="220">
+            <rect width="100%" height="100%" fill="white"/>
+            <text x="40" y="145" font-family="DejaVu Sans" font-size="88" fill="black">MUSITU 123</text>
+          </svg>
+          SVG
+          rsvg-convert qualification/ocr-smoke.svg -o qualification/ocr-smoke.png
+          TESSDATA_PREFIX="$GITHUB_WORKSPACE/qualification/tessdata" \
+            tesseract qualification/ocr-smoke.png stdout -l eng --psm 7 \
+            2>qualification/TESSERACT_OCR_STDERR.txt | tee qualification/TESSERACT_OCR_OUTPUT.txt
+          grep -Eiq 'MUSITU[[:space:]]+123' qualification/TESSERACT_OCR_OUTPUT.txt
+
+          sha256sum qualification/tesseract-5.5.3/bin/tesseract > qualification/TESSERACT_BINARY_SHA256.txt
+          ldd qualification/tesseract-5.5.3/bin/tesseract > qualification/TESSERACT_LDD.txt
+
+      - name: Emit qualification receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, pathlib, platform, subprocess, sys, importlib.metadata
+          root = pathlib.Path('qualification')
+          def sha(path):
+              h = hashlib.sha256()
+              with open(path,'rb') as f:
+                  for chunk in iter(lambda: f.read(1024*1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+          wheels = {}
+          for p in sorted((root/'wheels').iterdir()):
+              wheels[p.name] = {'bytes': p.stat().st_size, 'sha256': sha(p)}
+          tessdata = {}
+          for p in sorted((root/'tessdata').iterdir()):
+              tessdata[p.name] = {'bytes': p.stat().st_size, 'sha256': sha(p)}
+          receipt = {
+              'schema': 'musitu.foundry_forge.public_dependency_qualification.v1',
+              'target': {
+                  'python': platform.python_version(),
+                  'system': platform.system(),
+                  'machine': platform.machine(),
+                  'libc': platform.libc_ver(),
+              },
+              'python_wheels': wheels,
+              'runtime_versions': {
+                  'cryptography': importlib.metadata.version('cryptography'),
+                  'pypdf': importlib.metadata.version('pypdf'),
+                  'pypdfium2': importlib.metadata.version('pypdfium2'),
+              },
+              'tesseract': {
+                  'version': '5.5.3',
+                  'source_tag_object_sha': '6951ffe10ce031374bcd04fe400811da1e7e04ad',
+                  'source_commit_sha': 'db0ec62f81b0737fbbe184d8fea40af5738f8eef',
+                  'binary_sha256': sha(root/'tesseract-5.5.3/bin/tesseract'),
+                  'tessdata_fast_commit': '87416418657359cb625c412a48b6e1d6d41c29bd',
+                  'language_data': tessdata,
+                  'ocr_smoke': (root/'TESSERACT_OCR_OUTPUT.txt').read_text(errors='replace').strip(),
+              },
+              'checks': {
+                  'exact_cpython_3_12_13': True,
+                  'linux_x86_64_glibc_ge_2_34': True,
+                  'exact_python_wheel_hashes': True,
+                  'python_dependency_smoke': True,
+                  'cryptography_ed25519': True,
+                  'cryptography_embedded_openssl_4_0_2': True,
+                  'tesseract_5_5_3_built_from_pinned_tag': True,
+                  'tessdata_pinned': True,
+                  'tesseract_ocr_smoke': True,
+              },
+              'project_truth_boundary': {
+                  'target_cpython312_fully_qualified': False,
+                  'qualified_dependency_bytes_complete': False,
+                  'production_authorized': False,
+                  'commercial_candidate_sealed': False,
+                  'note': 'This receipt qualifies the public dependency stack only. Product-tree CPython 3.12.13 replay and authoritative custody admission remain separate gates.'
+              }
+          }
+          (root/'MUSITU_FOUNDRY_FORGE_PUBLIC_DEPENDENCY_QUALIFICATION.json').write_text(json.dumps(receipt, indent=2, sort_keys=True)+'\n')
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+          tar -C qualification -czf foundry-forge-public-dependency-qualification.tgz \
+            PLATFORM.json PYTHON_WHEEL_SHA256.txt PYTHON_RUNTIME_SMOKE.json wheels \
+            TESSERACT_SOURCE_IDENTITY.txt TESSERACT_VERSION.txt TESSDATA_UPSTREAM_COMMIT.txt \
+            TESSDATA_SHA256.txt TESSERACT_LANGS.txt TESSERACT_OCR_OUTPUT.txt \
+            TESSERACT_OCR_STDERR.txt TESSERACT_BINARY_SHA256.txt TESSERACT_LDD.txt \
+            BUILD_DEPENDENCIES.tsv tesseract-5.5.3 tessdata \
+            MUSITU_FOUNDRY_FORGE_PUBLIC_DEPENDENCY_QUALIFICATION.json
+          sha256sum foundry-forge-public-dependency-qualification.tgz \
+            | tee qualification/ARTIFACT_SHA256.txt
+
+      - name: Persist exact qualification bytes
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: foundry-forge-public-dependency-qualification
+          path: |
+            foundry-forge-public-dependency-qualification.tgz
+            qualification/MUSITU_FOUNDRY_FORGE_PUBLIC_DEPENDENCY_QUALIFICATION.json
+            qualification/ARTIFACT_SHA256.txt
+          if-no-files-found: error
+          retention-days: 90
