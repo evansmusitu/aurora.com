@@ -1,0 +1,173 @@
+name: Foundry Forge exact dependency qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - foundry-forge-qualification-20260911
+    paths:
+      - .github/workflows/foundry-forge-qualification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  qualify-linux-cpython31213:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Setup exact CPython 3.12.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12.13'
+          check-latest: false
+
+      - name: Acquire, hash and qualify exact pinned wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -VV
+          python - <<'PY'
+          import platform, sys
+          assert sys.version_info[:3] == (3, 12, 13), sys.version
+          libc, libc_version = platform.libc_ver()
+          assert libc == 'glibc', (libc, libc_version)
+          parts = tuple(int(x) for x in libc_version.split('.')[:2])
+          assert parts >= (2, 34), libc_version
+          assert platform.machine() == 'x86_64', platform.machine()
+          print('runtime=PASS', platform.platform(), libc, libc_version)
+          PY
+
+          rm -rf qualification
+          mkdir -p qualification/wheels qualification/extracted/cryptography qualification/extracted/pypdf qualification/extracted/pypdfium2
+
+          python -m pip download 'cryptography==50.0.1' \
+            --only-binary=:all: --no-deps \
+            --platform manylinux_2_34_x86_64 \
+            --python-version 3.12 --implementation cp --abi abi3 \
+            --dest qualification/wheels
+
+          python -m pip download 'pypdf==6.18.0' \
+            --only-binary=:all: --no-deps \
+            --dest qualification/wheels
+
+          python -m pip download 'pypdfium2==5.13.0' \
+            --only-binary=:all: --no-deps \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 --implementation cp \
+            --dest qualification/wheels
+
+          CRYPTO='qualification/wheels/cryptography-50.0.1-cp39-abi3-manylinux_2_34_x86_64.whl'
+          PYPDF='qualification/wheels/pypdf-6.18.0-py3-none-any.whl'
+          PDFIUM='qualification/wheels/pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl'
+          test -f "$CRYPTO"
+          test -f "$PYPDF"
+          test -f "$PDFIUM"
+
+          printf '%s  %s\n' '9dde0a357190eb3b1da1bb9ab750e9c85cba82ca5977aa0836cbb94e92611239' "$CRYPTO" | sha256sum -c -
+          printf '%s  %s\n' '05b762b77bcb9dcb4a7c91fcf5dded585b25bee7269ab3d3001d7c55fa1b324b' "$PYPDF" | sha256sum -c -
+          printf '%s  %s\n' '81df25c1ab4c13ff773102d3cbea1967511d079123b067fc077bd0c4d57d91d8' "$PDFIUM" | sha256sum -c -
+
+          python -m zipfile -e "$CRYPTO" qualification/extracted/cryptography
+          python -m zipfile -e "$PYPDF" qualification/extracted/pypdf
+          python -m zipfile -e "$PDFIUM" qualification/extracted/pypdfium2
+
+          PYTHONPATH="$PWD/qualification/extracted/cryptography:$PWD/qualification/extracted/pypdf:$PWD/qualification/extracted/pypdfium2" python - <<'PY'
+          import hashlib
+          import importlib.metadata
+          import json
+          import pathlib
+          import platform
+          import sys
+          import tempfile
+
+          import cryptography
+          import pypdf
+          import pypdfium2
+          from cryptography.hazmat.bindings.openssl.binding import Binding
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from pypdf import PdfReader, PdfWriter
+
+          assert sys.version_info[:3] == (3, 12, 13), sys.version
+          assert cryptography.__version__ == '50.0.1', cryptography.__version__
+          assert pypdf.__version__ == '6.18.0', pypdf.__version__
+          assert importlib.metadata.version('pypdfium2') == '5.13.0'
+
+          private = Ed25519PrivateKey.generate()
+          message = b'MUSITU Foundry Forge qualification'
+          signature = private.sign(message)
+          private.public_key().verify(signature, message)
+
+          binding = Binding()
+          openssl_version = binding.ffi.string(binding.lib.OpenSSL_version(0)).decode('ascii')
+          assert openssl_version.startswith('OpenSSL 4.0.2 '), openssl_version
+
+          with tempfile.TemporaryDirectory() as td:
+              path = pathlib.Path(td) / 'probe.pdf'
+              writer = PdfWriter()
+              writer.add_blank_page(width=72, height=72)
+              with path.open('wb') as handle:
+                  writer.write(handle)
+              reader = PdfReader(str(path))
+              assert len(reader.pages) == 1
+              doc = pypdfium2.PdfDocument(str(path))
+              assert len(doc) == 1
+              page = doc[0]
+              bitmap = page.render(scale=1)
+              assert bitmap.width > 0 and bitmap.height > 0
+              bitmap.close()
+              page.close()
+              doc.close()
+
+          wheel_specs = {
+              'cryptography': ('cryptography-50.0.1-cp39-abi3-manylinux_2_34_x86_64.whl', '9dde0a357190eb3b1da1bb9ab750e9c85cba82ca5977aa0836cbb94e92611239'),
+              'pypdf': ('pypdf-6.18.0-py3-none-any.whl', '05b762b77bcb9dcb4a7c91fcf5dded585b25bee7269ab3d3001d7c55fa1b324b'),
+              'pypdfium2': ('pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl', '81df25c1ab4c13ff773102d3cbea1967511d079123b067fc077bd0c4d57d91d8'),
+          }
+          wheels = {}
+          for name, (filename, expected) in wheel_specs.items():
+              path = pathlib.Path('qualification/wheels') / filename
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              assert actual == expected, (name, actual, expected)
+              wheels[name] = {'filename': filename, 'sha256': actual, 'bytes': path.stat().st_size}
+
+          libc, libc_version = platform.libc_ver()
+          report = {
+              'schema': 'musitu.foundry_forge.target_dependency_qualification.v1',
+              'qualified': True,
+              'runtime': {
+                  'python': platform.python_version(),
+                  'implementation': platform.python_implementation(),
+                  'machine': platform.machine(),
+                  'platform': platform.platform(),
+                  'libc': libc,
+                  'libc_version': libc_version,
+              },
+              'wheels': wheels,
+              'checks': {
+                  'cryptography_version': cryptography.__version__,
+                  'embedded_openssl': openssl_version,
+                  'ed25519_sign_verify': 'PASS',
+                  'pypdf_version': pypdf.__version__,
+                  'pypdf_read_write_smoke': 'PASS',
+                  'pypdfium2_version': importlib.metadata.version('pypdfium2'),
+                  'pypdfium2_render_smoke': 'PASS',
+              },
+              'truth_boundary': {
+                  'python_dependency_bytes_acquired': True,
+                  'python_dependency_target_runtime_qualified': True,
+                  'tesseract_5_5_3_qualified': False,
+                  'production_authorized': False,
+              },
+          }
+          out = pathlib.Path('qualification/DEPENDENCY_QUALIFICATION_CP31213.json')
+          out.write_text(json.dumps(report, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload exact wheel bytes and receipt
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: foundry-forge-python-dependency-qualification
+          path: qualification/
+          if-no-files-found: error
+          retention-days: 30
