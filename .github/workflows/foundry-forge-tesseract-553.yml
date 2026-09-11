@@ -15,13 +15,13 @@ jobs:
   qualify-tesseract-553:
     runs-on: ubuntu-24.04
     steps:
-      - name: Build and qualify exact native OCR runtime
+      - name: Build and qualify exact self-contained native OCR runtime
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            autoconf automake libtool pkg-config g++ make git curl \
+            autoconf automake libtool pkg-config g++ make git curl patchelf \
             libleptonica-dev libpango1.0-dev libcairo2-dev libicu-dev \
             imagemagick fonts-dejavu-core
 
@@ -56,23 +56,57 @@ jobs:
           p=pathlib.Path(sys.argv[1]); data=p.read_bytes()
           git_blob=hashlib.sha1(f"blob {len(data)}\0".encode()+data).hexdigest()
           assert git_blob == 'bbef4675053b5b468cdb477053e28b1c698ba08e', git_blob
-          print('eng_git_blob_sha1='+git_blob)
-          print('eng_sha256='+hashlib.sha256(data).hexdigest())
+          assert hashlib.sha256(data).hexdigest() == '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2'
           PY
 
-          TESSDATA_PREFIX="$PREFIX/share/tessdata" "$PREFIX/bin/tesseract" --version | tee "$EVIDENCE/tesseract.version.txt"
-          first_line="$(head -n1 "$EVIDENCE/tesseract.version.txt")"
-          test "$first_line" = 'tesseract 5.5.3'
-          TESSDATA_PREFIX="$PREFIX/share/tessdata" "$PREFIX/bin/tesseract" --list-langs | tee "$EVIDENCE/tesseract.languages.txt"
+          # Capture the complete non-glibc shared-library closure from the same
+          # qualified runner, then relocate Tesseract to resolve it from $ORIGIN.
+          ldd "$PREFIX/bin/tesseract" | tee "$EVIDENCE/tesseract.ldd.prebundle.txt"
+          mkdir -p "$PREFIX/lib"
+          mapfile -t linked < <(ldd "$PREFIX/bin/tesseract" | awk '/=> \/.*\(/ {print $3}' | sort -u)
+          for lib in "${linked[@]}"; do
+            base="$(basename "$lib")"
+            case "$base" in
+              libc.so.6|libm.so.6) continue ;;
+            esac
+            cp -L "$lib" "$PREFIX/lib/$base"
+          done
+          patchelf --set-rpath '$ORIGIN/../lib' "$PREFIX/bin/tesseract"
+          patchelf --set-rpath '$ORIGIN' "$PREFIX/lib/libtesseract.so.5.0.5"
+
+          LD_LIBRARY_PATH="$PREFIX/lib" ldd "$PREFIX/bin/tesseract" | tee "$EVIDENCE/tesseract.ldd.postbundle.txt"
+          python3 - "$PREFIX" "$EVIDENCE/tesseract.ldd.postbundle.txt" <<'PY'
+          import pathlib, re, sys
+          prefix=pathlib.Path(sys.argv[1]).resolve()
+          lines=pathlib.Path(sys.argv[2]).read_text().splitlines()
+          allowed_system={'libc.so.6','libm.so.6'}
+          failures=[]
+          for line in lines:
+              m=re.match(r'\s*(\S+)\s+=>\s+(\S+)', line)
+              if not m: continue
+              soname,target=m.groups()
+              if target=='not':
+                  failures.append(line); continue
+              if soname in allowed_system: continue
+              try:
+                  pathlib.Path(target).resolve().relative_to(prefix/'lib')
+              except ValueError:
+                  failures.append(line)
+          assert not failures, failures
+          print('bundled_non_glibc_dependency_closure=PASS')
+          PY
+
+          TESSDATA_PREFIX="$PREFIX/share/tessdata" LD_LIBRARY_PATH="$PREFIX/lib" "$PREFIX/bin/tesseract" --version | tee "$EVIDENCE/tesseract.version.txt"
+          test "$(head -n1 "$EVIDENCE/tesseract.version.txt")" = 'tesseract 5.5.3'
+          TESSDATA_PREFIX="$PREFIX/share/tessdata" LD_LIBRARY_PATH="$PREFIX/lib" "$PREFIX/bin/tesseract" --list-langs | tee "$EVIDENCE/tesseract.languages.txt"
           grep -qx 'eng' "$EVIDENCE/tesseract.languages.txt"
-          ldd "$PREFIX/bin/tesseract" | tee "$EVIDENCE/tesseract.ldd.txt"
           gcc --version | head -n1 > "$EVIDENCE/compiler.txt"
           pkg-config --modversion lept > "$EVIDENCE/leptonica.version.txt"
 
           FONT='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
           convert -size 1800x260 xc:white -font "$FONT" -fill black -pointsize 54 -gravity center \
             -annotate +0+0 'MUSITU FORGE OCR QUALIFICATION PROBE' "$ROOT/probe.png"
-          TESSDATA_PREFIX="$PREFIX/share/tessdata" "$PREFIX/bin/tesseract" "$ROOT/probe.png" stdout \
+          TESSDATA_PREFIX="$PREFIX/share/tessdata" LD_LIBRARY_PATH="$PREFIX/lib" "$PREFIX/bin/tesseract" "$ROOT/probe.png" stdout \
             --dpi 250 -l eng --psm 6 tsv > "$EVIDENCE/probe.tsv" 2> "$EVIDENCE/probe.stderr.txt"
 
           python3 - "$EVIDENCE/probe.tsv" <<'PY'
@@ -86,74 +120,33 @@ jobs:
               try: value=float(row.get('conf') or -1)
               except ValueError: value=-1
               if 0 <= value <= 100: conf.append(value)
-          text=' '.join(words)
-          print('ocr_text='+text)
-          mean=sum(conf)/len(conf) if conf else 0
-          print('mean_confidence='+str(mean))
-          assert 'MUSITU' in text.upper(), text
-          assert 'FORGE' in text.upper(), text
-          assert 'QUALIFICATION' in text.upper(), text
+          text=' '.join(words); mean=sum(conf)/len(conf) if conf else 0
+          print('ocr_text='+text); print('mean_confidence='+str(mean))
+          assert all(token in text.upper() for token in ('MUSITU','FORGE','QUALIFICATION')), text
           assert mean >= 80.0, mean
           PY
 
           cd "$GITHUB_WORKSPACE"
           python3 - <<'PY'
           import hashlib, json, pathlib, platform, subprocess
-          root=pathlib.Path('tesseract_qualification')
-          binary=root/'runtime/bin/tesseract'
-          eng=root/'runtime/share/tessdata/eng.traineddata'
+          root=pathlib.Path('tesseract_qualification'); runtime=root/'runtime'
+          binary=runtime/'bin/tesseract'; eng=runtime/'share/tessdata/eng.traineddata'
           def sha(p):
               h=hashlib.sha256()
               with p.open('rb') as f:
                   for chunk in iter(lambda:f.read(1024*1024),b''): h.update(chunk)
               return h.hexdigest()
-          version=(root/'evidence/tesseract.version.txt').read_text().splitlines()[0]
-          leptonica=(root/'evidence/leptonica.version.txt').read_text().strip()
-          tsv=(root/'evidence/probe.tsv').read_bytes()
+          libraries=[]
+          for p in sorted((runtime/'lib').iterdir()):
+              if p.is_file(): libraries.append({'filename':p.name,'bytes':p.stat().st_size,'sha256':sha(p)})
           report={
-            'schema':'musitu.foundry_forge.tesseract_qualification.v1',
+            'schema':'musitu.foundry_forge.tesseract_qualification.v2',
             'qualified':True,
-            'source':{
-              'repository':'tesseract-ocr/tesseract',
-              'tag':'5.5.3',
-              'tag_object_sha':'6951ffe10ce031374bcd04fe400811da1e7e04ad',
-              'commit_sha':'db0ec62f81b0737fbbe184d8fea40af5738f8eef'
-            },
-            'language_data':{
-              'repository':'tesseract-ocr/tessdata_fast',
-              'commit_sha':'87416418657359cb625c412a48b6e1d6d41c29bd',
-              'language':'eng',
-              'git_blob_sha1':'bbef4675053b5b468cdb477053e28b1c698ba08e',
-              'bytes':eng.stat().st_size,
-              'sha256':sha(eng)
-            },
-            'runtime':{
-              'version':version,
-              'binary_sha256':sha(binary),
-              'binary_bytes':binary.stat().st_size,
-              'machine':platform.machine(),
-              'libc':platform.libc_ver()[0],
-              'libc_version':platform.libc_ver()[1],
-              'leptonica_version':leptonica,
-              'linked_libraries_sha256':hashlib.sha256((root/'evidence/tesseract.ldd.txt').read_bytes()).hexdigest()
-            },
-            'checks':{
-              'source_tag_identity':'PASS',
-              'source_commit_identity':'PASS',
-              'eng_git_blob_identity':'PASS',
-              'exact_version':'PASS',
-              'eng_language_discovery':'PASS',
-              'real_ocr_probe':'PASS',
-              'probe_tsv_sha256':hashlib.sha256(tsv).hexdigest()
-            },
-            'truth_boundary':{
-              'tesseract_5_5_3_binary_bytes_acquired':True,
-              'tesseract_5_5_3_qualified':True,
-              'eng_traineddata_acquired_and_hash_bound':True,
-              'qualified_dependency_bytes_complete':False,
-              'target_cpython312_fully_qualified':False,
-              'production_authorized':False
-            }
+            'source':{'repository':'tesseract-ocr/tesseract','tag':'5.5.3','tag_object_sha':'6951ffe10ce031374bcd04fe400811da1e7e04ad','commit_sha':'db0ec62f81b0737fbbe184d8fea40af5738f8eef'},
+            'language_data':{'repository':'tesseract-ocr/tessdata_fast','commit_sha':'87416418657359cb625c412a48b6e1d6d41c29bd','language':'eng','git_blob_sha1':'bbef4675053b5b468cdb477053e28b1c698ba08e','bytes':eng.stat().st_size,'sha256':sha(eng)},
+            'runtime':{'version':(root/'evidence/tesseract.version.txt').read_text().splitlines()[0],'binary_sha256':sha(binary),'binary_bytes':binary.stat().st_size,'machine':platform.machine(),'libc':platform.libc_ver()[0],'libc_version':platform.libc_ver()[1],'leptonica_version':(root/'evidence/leptonica.version.txt').read_text().strip(),'bundled_library_count':len(libraries),'bundled_libraries':libraries},
+            'checks':{'source_tag_identity':'PASS','source_commit_identity':'PASS','eng_git_blob_identity':'PASS','exact_version':'PASS','eng_language_discovery':'PASS','real_ocr_probe':'PASS','non_glibc_shared_library_closure':'PASS','probe_tsv_sha256':sha(root/'evidence/probe.tsv')},
+            'truth_boundary':{'tesseract_5_5_3_binary_bytes_acquired':True,'tesseract_5_5_3_qualified':True,'eng_traineddata_acquired_and_hash_bound':True,'native_runtime_dependency_closure_bundled':True,'qualified_dependency_bytes_complete':False,'target_cpython312_fully_qualified':False,'production_authorized':False}
           }
           (root/'TESSERACT_5_5_3_QUALIFICATION.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
           print(json.dumps(report,indent=2,sort_keys=True))
@@ -166,7 +159,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: foundry-forge-tesseract-5.5.3-qualification
+          name: foundry-forge-tesseract-5.5.3-qualification-v2
           path: tesseract_qualification/
           if-no-files-found: error
           retention-days: 30
