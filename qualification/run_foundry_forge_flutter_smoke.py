@@ -37,6 +37,9 @@ dependencies:
   flutter_secure_storage: 11.1.1
   http: 1.6.0
   image: 4.9.2
+  media_kit: 1.2.6
+  media_kit_video: 2.0.1
+  media_kit_libs_video: 1.0.7
   path_provider: 2.1.6
   sembast: 3.8.10
   sembast_web: 2.4.5+1
@@ -60,9 +63,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as image;
+import 'package:media_kit/media_kit.dart' as media_kit;
+import 'package:media_kit_video/media_kit_video.dart' as media_video;
 import 'package:path_provider/path_provider.dart';
 
 import 'db.dart';
+
+void publicPlaybackTypeProbe(
+  media_kit.Player player,
+  media_video.VideoController controller,
+) {
+  if (player.hashCode == -1 || controller.hashCode == -1) {
+    throw StateError('unreachable');
+  }
+}
 
 Future<void> publicDependencyProbe() async {
   final cipher = AesGcm.with256bits();
@@ -94,12 +108,16 @@ Future<void> publicDependencyProbe() async {
     throw StateError('unreachable');
   }
 
+  final playbackProbe = publicPlaybackTypeProbe;
+  if (playbackProbe.hashCode == -1) throw StateError('unreachable');
+
   final marker = databaseFactoryMarker();
   if (marker.hashCode == -1) throw StateError('unreachable');
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  media_kit.MediaKit.ensureInitialized();
   await publicDependencyProbe();
   runApp(const MaterialApp(home: Scaffold(body: Text('public toolchain smoke'))));
 }
@@ -128,13 +146,21 @@ DB_STUB = r'''Object databaseFactoryMarker() => 'unsupported';
 TEST = r'''import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as image;
+import 'package:media_kit/media_kit.dart' as media_kit;
+import 'package:media_kit_video/media_kit_video.dart' as media_video;
+
+void typedPlaybackSurface(
+  media_kit.Player player,
+  media_video.VideoController controller,
+) {}
 
 void main() {
-  test('AES-GCM and image dependencies are available', () {
+  test('AES-GCM, image and playback dependency types are available', () {
     expect(AesGcm.with256bits().nonceLength, greaterThan(0));
     final generated = image.Image(width: 1, height: 1)
       ..clear(image.ColorRgb8(0, 0, 0));
     expect(image.encodeJpg(generated), isNotEmpty);
+    expect(typedPlaybackSurface, isA<Function>());
   });
 }
 '''
@@ -195,7 +221,7 @@ def main() -> None:
             'ios': (FLUTTER, 'build', 'ios', '--simulator', '--debug'),
         }
         run(*commands[args.target], cwd=root)
-        print(f'PUBLIC_TOOLCHAIN_SMOKE_PASS target={args.target}', flush=True)
+        print(f'PUBLIC_VIDEO_REVIEW_TOOLCHAIN_SMOKE_PASS target={args.target}', flush=True)
 
 
 if __name__ == '__main__':
