@@ -54,6 +54,7 @@ flutter:
 '''
 
 MAIN = r'''import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart' as camera;
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -69,13 +70,30 @@ import 'package:path_provider/path_provider.dart';
 
 import 'db.dart';
 
-void publicPlaybackTypeProbe(
-  media_kit.Player player,
-  media_video.VideoController controller,
-) {
-  if (player.hashCode == -1 || controller.hashCode == -1) {
+Future<void> compileOnlyMemoryPlaybackSurface(Uint8List data) async {
+  final player = media_kit.Player();
+  final controller = media_video.VideoController(player);
+  final media = await media_kit.Media.memory(data, type: 'video/mp4');
+  final position = player.stream.position.listen((_) {});
+  final duration = player.stream.duration.listen((_) {});
+  final playing = player.stream.playing.listen((_) {});
+  final completed = player.stream.completed.listen((_) {});
+  final widget = media_video.Video(
+    controller: controller,
+    controls: media_video.NoVideoControls,
+  );
+  await player.open(media, play: false);
+  await player.play();
+  await player.pause();
+  await player.seek(Duration.zero);
+  if (widget.hashCode == -1 || controller.hashCode == -1) {
     throw StateError('unreachable');
   }
+  await position.cancel();
+  await duration.cancel();
+  await playing.cancel();
+  await completed.cancel();
+  await player.dispose();
 }
 
 Future<void> publicDependencyProbe() async {
@@ -104,12 +122,12 @@ Future<void> publicDependencyProbe() async {
 
   final cameraFunction = camera.availableCameras;
   final supportDirectoryFunction = getApplicationSupportDirectory;
-  if (cameraFunction.hashCode == -1 || supportDirectoryFunction.hashCode == -1) {
+  final playbackFunction = compileOnlyMemoryPlaybackSurface;
+  if (cameraFunction.hashCode == -1 ||
+      supportDirectoryFunction.hashCode == -1 ||
+      playbackFunction.hashCode == -1) {
     throw StateError('unreachable');
   }
-
-  final playbackProbe = publicPlaybackTypeProbe;
-  if (playbackProbe.hashCode == -1) throw StateError('unreachable');
 
   final marker = databaseFactoryMarker();
   if (marker.hashCode == -1) throw StateError('unreachable');
@@ -143,24 +161,43 @@ Object databaseFactoryMarker() => databaseFactoryWeb;
 DB_STUB = r'''Object databaseFactoryMarker() => 'unsupported';
 '''
 
-TEST = r'''import 'package:cryptography/cryptography.dart';
+TEST = r'''import 'dart:typed_data';
+
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as image;
 import 'package:media_kit/media_kit.dart' as media_kit;
 import 'package:media_kit_video/media_kit_video.dart' as media_video;
 
-void typedPlaybackSurface(
-  media_kit.Player player,
-  media_video.VideoController controller,
-) {}
+Future<void> compileOnlyMemoryPlaybackSurface(Uint8List data) async {
+  final player = media_kit.Player();
+  final controller = media_video.VideoController(player);
+  final media = await media_kit.Media.memory(data, type: 'video/mp4');
+  final position = player.stream.position.listen((_) {});
+  final duration = player.stream.duration.listen((_) {});
+  final playing = player.stream.playing.listen((_) {});
+  final completed = player.stream.completed.listen((_) {});
+  final widget = media_video.Video(
+    controller: controller,
+    controls: media_video.NoVideoControls,
+  );
+  if (media.uri.isEmpty || widget.hashCode == -1 || controller.hashCode == -1) {
+    throw StateError('unreachable');
+  }
+  await position.cancel();
+  await duration.cancel();
+  await playing.cancel();
+  await completed.cancel();
+  await player.dispose();
+}
 
 void main() {
-  test('AES-GCM, image and playback dependency types are available', () {
+  test('AES-GCM, image and exact playback API surface are available', () {
     expect(AesGcm.with256bits().nonceLength, greaterThan(0));
     final generated = image.Image(width: 1, height: 1)
       ..clear(image.ColorRgb8(0, 0, 0));
     expect(image.encodeJpg(generated), isNotEmpty);
-    expect(typedPlaybackSurface, isA<Function>());
+    expect(compileOnlyMemoryPlaybackSurface, isA<Function>());
   });
 }
 '''
