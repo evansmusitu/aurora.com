@@ -1,0 +1,53 @@
+name: Foundry FORGE Flutter toolchain smoke
+
+on:
+  push:
+    branches:
+      - foundry-forge-flutter-toolchain-20260912
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: web
+          - os: ubuntu-latest
+            target: android
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: windows
+          - os: macos-latest
+            target: macos
+          - os: macos-latest
+            target: ios
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        if: matrix.target == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+      - name: Install Linux desktop and secure-storage build dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libjsoncpp-dev
+      - name: Show toolchain
+        run: flutter doctor -v
+      - name: Run source-free dependency/build smoke
+        run: python qualification/run_foundry_forge_flutter_smoke.py --target ${{ matrix.target }}
