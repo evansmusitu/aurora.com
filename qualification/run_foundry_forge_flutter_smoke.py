@@ -78,7 +78,7 @@ Future<void> publicDependencyProbe() async {
   if (connectivity.hashCode == -1) throw StateError('unreachable');
 
   const mediaType = XTypeGroup(label: 'media', extensions: ['jpg']);
-  if (mediaType.label.isEmpty) throw StateError('file selector probe failed');
+  if ((mediaType.label ?? '').isEmpty) throw StateError('file selector probe failed');
 
   final generated = image.Image(width: 2, height: 2)
     ..clear(image.ColorRgb8(255, 255, 255));
