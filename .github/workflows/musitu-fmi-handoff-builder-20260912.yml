@@ -1,0 +1,337 @@
+name: MUSITU FMI authoritative continuation handoff 20260912
+
+on:
+  push:
+    branches:
+      - fmi-handoff-transport-20260912
+
+permissions:
+  contents: read
+
+jobs:
+  build-handoff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build non-secret authoritative continuation envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p handoff/{00_START_HERE,AUTHORITY,SOURCE_POINTER,EVIDENCE,HISTORY,NEXT_STEPS,TRANSPORT}
+
+          cat > handoff/00_START_HERE/NEW_CHAT_START_HERE.md <<'EOF'
+          # MUSITU Frontier Market Intelligence — Authoritative Continuation
+
+          THIS IS A CONTINUATION, NOT A RESTART, REDESIGN, SUMMARY-ONLY EXERCISE, OR PERMISSION TO RECONSTRUCT FROM CHAT MEMORY.
+
+          This package is the authoritative chat-shift continuation envelope for MUSITU Frontier Market Intelligence (FMI). Private product source bytes are deliberately not duplicated onto the public transport builder. The exact private source is cryptographically pinned to the connected GitHub repository, branch, commit, and tree below and MUST be re-read directly before any write. This design prevents a public transport artifact from becoming a stale or privacy-weak substitute for the private source of truth.
+
+          ## First authority
+          Repository: `evansmusitu/mft-gpu-training`
+          Working branch: `musitu-fmi-open-model-federation-20260907`
+          Verified working HEAD at handoff: `d67e369459ac3ced347593854c8d2284ceb1e604`
+          Verified working tree: `baa09b12bfdbb7f6465ce2f71beef73368988907`
+          HEAD message: `Record accepted FMI single-turn real-model qualification`
+          HEAD parent: `4976458f6d1cf71dc6edf59e9162dd1b6fc58c6c`
+          Sealed `main`: `564bef47bc2cf7a477a904594bc9b6cd294d075e`
+          PR: #9, MUST remain OPEN + DRAFT + UNMERGED unless separately authorized after all gates.
+
+          NEWER VERIFIED GITHUB STATE ALWAYS OVERRIDES THIS HANDOFF SHA IF THE BRANCH HAS ADVANCED. Never roll the branch backward to match this package.
+
+          ## Proven real-model state
+          Kaggle private CPU kernel ID `133917305`, slug `tallyvans/musitu-fmi-private-qualification`, version `10` completed successfully.
+          Qualification status: `ACCEPTED_FOR_QUALIFICATION_EVIDENCE_ONLY`.
+          Council accepted: true.
+          Contradicting members: none.
+          Qwen and Phi exact pinned bytes/revisions/hashes both verified and returned code 0.
+          Post-qualification pytest: `574 passed in 17.43s`.
+          compileall: PASS.
+          Sealer: `SEALED_CLEAN_VERIFIED`.
+
+          Sealed checkpoint: `MUSITU_FMI_PRIVATE_REAL_MODEL_574_GREEN_20260911.zip`
+          Bytes: `2498182`
+          SHA-256: `ff522be1fe8bfb680c1ae67abdc5dd732707dbf4ff4384bb009783d0312a746e`
+          Manifest SHA-256: `156cdaf3c0db76d57f853cd57a829ae78384eb8023152d1bfae367d11b13ac7d`
+
+          ## Exact current blocker
+          The real-model qualification is GREEN. Deployment is still BLOCKED because the sealed checkpoint has not yet completed the required connected-Google-Drive upload + independent readback SHA verification. The branch evidence records this truthfully as `BLOCKED_PENDING_DRIVE_ROUNDTRIP`.
+
+          Do NOT rerun the Qwen/Phi council unless newer evidence invalidates the accepted V10 result. First finish the Drive roundtrip, update evidence/pointer/PR, reverify main/PR/branch, then proceed to deployment only if every required gate remains green.
+
+          ## Hard locks
+          Provider spend cap: USD 0.
+          Numeric finance/risk authority: `DETERMINISTIC_TOOL_ONLY`.
+          Model override: forbidden.
+          Foundation training: disabled.
+          Production model authority: false until separately promoted.
+          Live trading: false.
+          Model-authorized trades: false.
+          Scaled autonomy: false.
+          Exness multi-user live: `LOCKED_PENDING_WRITTEN_APPROVAL`.
+          Live profitability: `NOT_YET_CERTIFIED`.
+          Superiority: `NOT_CERTIFIED`.
+          Frontier: `NOT_YET_CERTIFIED`.
+
+          Read `00_START_HERE/READ_ORDER.txt` next and follow it exactly.
+          EOF
+
+          cat > handoff/00_START_HERE/READ_ORDER.txt <<'EOF'
+          1. 00_START_HERE/NEW_CHAT_START_HERE.md
+          2. AUTHORITY/AUTHORITATIVE_STATE_20260912.json
+          3. SOURCE_POINTER/PRIVATE_GITHUB_SOURCE_AUTHORITY.json
+          4. EVIDENCE/V10_ACCEPTED_QUALIFICATION_SUMMARY.json
+          5. EVIDENCE/SEALED_CHECKPOINT_POINTER.json
+          6. EVIDENCE/DRIVE_ROUNDTRIP_BOUNDARY.json
+          7. HISTORY/EXECUTION_FAILURE_LEDGER.md
+          8. HISTORY/HARD_CONSTRAINTS.md
+          9. NEXT_STEPS/EXACT_NEXT_EXECUTION_BOUNDARY.md
+          10. TRANSPORT/TRANSPORT_BOUNDARY.md
+
+          BEFORE ANY WRITE: re-read connected GitHub repo `evansmusitu/mft-gpu-training`, working branch `musitu-fmi-open-model-federation-20260907`, sealed `main`, and PR #9. Newer verified GitHub state overrides this handoff. Never roll back to a stale handoff SHA.
+          EOF
+
+          cat > handoff/00_START_HERE/EXACT_NEW_CHAT_COMMAND_TEMPLATE.txt <<'EOF'
+          RESUME MUSITU FRONTIER MARKET INTELLIGENCE FROM THE EXACT CURRENT AUTHORITATIVE WHOLE-PRODUCT CONTINUATION HANDOFF.
+
+          THIS IS A CONTINUATION — NOT A RESTART, REDESIGN, SUMMARY-ONLY EXERCISE, BRAINSTORMING SESSION, OR PERMISSION TO RECONSTRUCT FROM MEMORY OR CHAT HISTORY.
+
+          Use my connected Google Drive and connected GitHub directly.
+
+          Google Drive folder:
+          MUSITU_FMI_HANDOFFS
+
+          Retrieve the exact authoritative handoff ZIP named in this chat and verify its SHA-256 against the exact SHA supplied in this chat/checksum sidecar. If the checksum does not match, STOP immediately.
+
+          Extract it and READ FIRST:
+          00_START_HERE/NEW_CHAT_START_HERE.md
+
+          Then follow 00_START_HERE/READ_ORDER.txt exactly.
+
+          Before any write, re-read connected GitHub repository `evansmusitu/mft-gpu-training`, branch `musitu-fmi-open-model-federation-20260907`, sealed `main`, and PR #9. At handoff the verified working HEAD is `d67e369459ac3ced347593854c8d2284ceb1e604`, tree `baa09b12bfdbb7f6465ce2f71beef73368988907`, sealed main `564bef47bc2cf7a477a904594bc9b6cd294d075e`, and PR #9 is OPEN + DRAFT + UNMERGED. NEWER VERIFIED GITHUB STATE ALWAYS OVERRIDES THESE HANDOFF SHAS. Never roll back.
+
+          V10 real Qwen+Phi qualification is already accepted and sealed. Do not rerun it unless newer evidence invalidates it. The exact remaining blocker is the connected-Drive upload/readback of `MUSITU_FMI_PRIVATE_REAL_MODEL_574_GREEN_20260911.zip` (2498182 bytes, SHA-256 `ff522be1fe8bfb680c1ae67abdc5dd732707dbf4ff4384bb009783d0312a746e`, manifest SHA-256 `156cdaf3c0db76d57f853cd57a829ae78384eb8023152d1bfae367d11b13ac7d`). Complete that roundtrip, update evidence/pointer/PR #9 while keeping it draft/unmerged, reverify sealed main, and only then proceed to deployment if every required gate is green.
+
+          Maintain provider spend at USD 0. Do not enable live trading, model-authorized trades, foundation training, production model authority, scaled autonomy, or alter deterministic finance/risk authority. Execute directly and fail closed on any mismatch.
+          EOF
+
+          cat > handoff/AUTHORITY/AUTHORITATIVE_STATE_20260912.json <<'EOF'
+          {
+            "schema": "musitu-fmi.authoritative-continuation-state.v1",
+            "project": "MUSITU Frontier Market Intelligence",
+            "handoff_date": "2026-09-12",
+            "repository": "evansmusitu/mft-gpu-training",
+            "working_branch": "musitu-fmi-open-model-federation-20260907",
+            "verified_working_head": "d67e369459ac3ced347593854c8d2284ceb1e604",
+            "verified_working_tree": "baa09b12bfdbb7f6465ce2f71beef73368988907",
+            "head_parent": "4976458f6d1cf71dc6edf59e9162dd1b6fc58c6c",
+            "head_message": "Record accepted FMI single-turn real-model qualification",
+            "sealed_main": "564bef47bc2cf7a477a904594bc9b6cd294d075e",
+            "pr": {"number": 9, "state": "open", "draft": true, "merged": false},
+            "precedence": "NEWER_VERIFIED_GITHUB_STATE_OVERRIDES_HANDOFF",
+            "rollback_forbidden": true,
+            "deployment_gate": "BLOCKED_PENDING_DRIVE_ROUNDTRIP"
+          }
+          EOF
+
+          cat > handoff/SOURCE_POINTER/PRIVATE_GITHUB_SOURCE_AUTHORITY.json <<'EOF'
+          {
+            "schema": "musitu-fmi.private-source-authority-pointer.v1",
+            "repository": "evansmusitu/mft-gpu-training",
+            "visibility": "private",
+            "working_branch": "musitu-fmi-open-model-federation-20260907",
+            "commit": "d67e369459ac3ced347593854c8d2284ceb1e604",
+            "tree": "baa09b12bfdbb7f6465ce2f71beef73368988907",
+            "parent": "4976458f6d1cf71dc6edf59e9162dd1b6fc58c6c",
+            "rehydration_rule": "Use connected GitHub directly. Verify current branch. If current verified branch is ahead, use the newer state. Never substitute public transport files for private source bytes.",
+            "source_bytes_in_public_transport": false,
+            "reason": "Preserve source confidentiality and prevent a stale transport snapshot from overriding live private Git authority."
+          }
+          EOF
+
+          cat > handoff/EVIDENCE/V10_ACCEPTED_QUALIFICATION_SUMMARY.json <<'EOF'
+          {
+            "schema": "musitu-fmi.v10-accepted-qualification-summary.v1",
+            "kaggle": {
+              "kernel_id": 133917305,
+              "slug": "tallyvans/musitu-fmi-private-qualification",
+              "version": 10,
+              "status": "COMPLETE",
+              "private": true,
+              "gpu": false,
+              "tpu": false,
+              "execution_surface": "KAGGLE_PRIVATE_CPU_LOCAL_PROCESS"
+            },
+            "runtime": {
+              "tag": "b10837",
+              "release_commit": "5202104b59ada9005db079eea43882a2b7bf5802",
+              "archive_sha256": "d0514baaa6e1711eb02cbe2cfa9ca4fee7d8dc6ab50a0f6046eaf91d8a444b7f",
+              "native_single_turn_flag": "--single-turn",
+              "single_turn_injections": 2,
+              "inference_timeout_seconds": 300,
+              "timeout_widened": false,
+              "context": 2048,
+              "threads": 2,
+              "temperature": 0,
+              "seed": 42,
+              "max_new_tokens": 160
+            },
+            "models": [
+              {
+                "id": "Qwen/Qwen3-4B-GGUF",
+                "revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+                "file": "Qwen3-4B-Q4_K_M.gguf",
+                "bytes": 2497280256,
+                "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+                "returncode": 0,
+                "elapsed_seconds": 47.000388,
+                "output_sha256": "0317e228e26b1d75c90facfcd65ef5970a5bd5f9633f64a0ef776c53b6422919"
+              },
+              {
+                "id": "microsoft/Phi-3-mini-4k-instruct-gguf",
+                "revision": "8842f87a812f23f981be51e31fbbfbc34e72c16d",
+                "file": "Phi-3-mini-4k-instruct-q4.gguf",
+                "bytes": 2393231072,
+                "sha256": "8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef",
+                "returncode": 0,
+                "elapsed_seconds": 59.560097,
+                "output_sha256": "4ea997eb4cf4110d0a7b9f1ee1ba5eb57f3da612be13b4c8225469621da42b67"
+              }
+            ],
+            "qualification": {
+              "status": "ACCEPTED_FOR_QUALIFICATION_EVIDENCE_ONLY",
+              "council_accepted": true,
+              "contradicting_members": [],
+              "fact_bundle_sha256": "5ac3bbf3315858df5d4654bea12100bad883f33bc4532f7c2535f03ecc2c5b98",
+              "qualification_evidence_sha256": "7774634477f9df89f90a2fb4822dcce2946d4048a22c17390b3eb2071dc0c40f",
+              "adapter_evidence_sha256": "dbc032127cd17eee3dbb1cfac263aa7db2328a56371d65ec65857902a577664d",
+              "provider_api_used": false,
+              "provider_spend_usd": 0.0
+            },
+            "post_qualification": {"pytest": "574 passed in 17.43s", "compileall": "PASS"}
+          }
+          EOF
+
+          cat > handoff/EVIDENCE/SEALED_CHECKPOINT_POINTER.json <<'EOF'
+          {
+            "schema": "musitu-fmi.sealed-checkpoint-continuation-pointer.v1",
+            "name": "MUSITU_FMI_PRIVATE_REAL_MODEL_574_GREEN_20260911.zip",
+            "bytes": 2498182,
+            "sha256": "ff522be1fe8bfb680c1ae67abdc5dd732707dbf4ff4384bb009783d0312a746e",
+            "manifest_name": "MUSITU_FMI_PRIVATE_REAL_MODEL_CHECKPOINT_MANIFEST_20260911.json",
+            "manifest_sha256": "156cdaf3c0db76d57f853cd57a829ae78384eb8023152d1bfae367d11b13ac7d",
+            "seal_status": "SEALED_CLEAN_VERIFIED",
+            "clean_manifest_controlled_files": 695,
+            "clean_manifest_membership_exact": true,
+            "clean_pytest_passed": 574,
+            "clean_compileall": "PASS",
+            "zip_integrity": "PASS",
+            "source_working_head_for_v10": "4976458f6d1cf71dc6edf59e9162dd1b6fc58c6c",
+            "accepted_evidence_commit": "d67e369459ac3ced347593854c8d2284ceb1e604"
+          }
+          EOF
+
+          cat > handoff/EVIDENCE/DRIVE_ROUNDTRIP_BOUNDARY.json <<'EOF'
+          {
+            "schema": "musitu-fmi.drive-roundtrip-boundary.v1",
+            "required": true,
+            "status": "PENDING_CONNECTOR_NATIVE_FILE_HANDLE",
+            "sealed_checkpoint_destination_folder_id": "1xMc3KHQhN1wk5gZ2ZsP93aLe4QoQa-4h",
+            "handoff_folder": "MUSITU_FMI_HANDOFFS",
+            "handoff_folder_id": "11AJn2ijzySnt87utklSqQ7H3RObUguWd",
+            "raw_upload_attempted": true,
+            "raw_upload_completed": false,
+            "readback_sha256": null,
+            "required_readback_sha256": "ff522be1fe8bfb680c1ae67abdc5dd732707dbf4ff4384bb009783d0312a746e",
+            "classification": "TRANSPORT_BLOCKER_NOT_QUALIFICATION_FAILURE",
+            "deployment_gate": "BLOCKED_PENDING_DRIVE_ROUNDTRIP"
+          }
+          EOF
+
+          cat > handoff/HISTORY/EXECUTION_FAILURE_LEDGER.md <<'EOF'
+          # FMI real-model execution failure ledger
+
+          These failures are preserved as evidence and must not be relabeled as model failures when they were transport/runtime failures.
+
+          - V1: bootstrap URL serialization defect (`URLError: no host given`). No model inference.
+          - V2/V3: temporary private-GitHub raw URL access failures; no model inference. One duplicate version resulted from a Neon deployment-propagation race.
+          - V4: reached real Qwen execution but hit the original 300-second timeout while llama CLI remained in its loop.
+          - V5: widened 1200-second timeout; Qwen stayed alive with no OOM/OOM-kill but still timed out. Phi did not start.
+          - V7: widened 3600-second timeout; Kaggle killed the session around 3651 seconds. No accepted model evidence.
+          - Root cause: pinned llama.cpp b10837 supports native `--single-turn`; `--no-conversation` does not itself terminate the CLI after one generated response. `--single-turn` is the correct lifecycle control.
+          - Commit `4976458f6d1cf71dc6edf59e9162dd1b6fc58c6c`: added exact Kaggle single-turn wrapper, keeping original 300-second inference timeout and all deterministic/model parameters unchanged.
+          - V10: native single-turn injected exactly twice; Qwen 47.000388s, Phi 59.560097s; both return code 0; council accepted; zero contradictions; 574 + compileall + clean seal all pass.
+          - Commit `d67e369459ac3ced347593854c8d2284ceb1e604`: recorded accepted V10 qualification evidence on working branch.
+          EOF
+
+          cat > handoff/HISTORY/HARD_CONSTRAINTS.md <<'EOF'
+          # Hard constraints — preserve exactly
+
+          - Provider spend cap is USD 0 unless user explicitly changes it.
+          - No deployment until required completion/certification gates are green.
+          - Numeric finance/risk authority remains `DETERMINISTIC_TOOL_ONLY`.
+          - Model override of deterministic facts is forbidden.
+          - Foundation training disabled.
+          - Production model authority false until separately promoted.
+          - Live trading false.
+          - Model-authorized trade execution false.
+          - Scaled autonomy false.
+          - Exness multi-user live remains `LOCKED_PENDING_WRITTEN_APPROVAL`.
+          - Live profitability is `NOT_YET_CERTIFIED`.
+          - Superiority is `NOT_CERTIFIED`.
+          - Frontier is `NOT_YET_CERTIFIED`.
+          - PR #9 stays DRAFT and UNMERGED unless later explicitly authorized after evidence gates.
+          - Sealed `main` must remain exact `564bef47bc2cf7a477a904594bc9b6cd294d075e` until a separately authorized promotion gate.
+          - Failed qualification/transport attempts are evidence. Do not suppress, rewrite, or fabricate them.
+          - Do not weaken hashes, model versions, deterministic settings, council membership, or acceptance gates to fit hardware/runtime constraints.
+          EOF
+
+          cat > handoff/NEXT_STEPS/EXACT_NEXT_EXECUTION_BOUNDARY.md <<'EOF'
+          # Exact next execution boundary
+
+          Do not rerun V10 unless newer evidence invalidates it.
+
+          1. Re-read connected GitHub repo `evansmusitu/mft-gpu-training` branch `musitu-fmi-open-model-federation-20260907`, sealed `main`, and PR #9. Newer verified branch state overrides handoff; never roll back.
+          2. Require accepted V10 evidence to remain present and consistent with checkpoint SHA `ff522be1fe8bfb680c1ae67abdc5dd732707dbf4ff4384bb009783d0312a746e` and manifest SHA `156cdaf3c0db76d57f853cd57a829ae78384eb8023152d1bfae367d11b13ac7d`.
+          3. Obtain the sealed checkpoint bytes from the authenticated completed Kaggle V10 artifact path or another cryptographically identical private source. Do not reconstruct or substitute model evidence.
+          4. Upload `MUSITU_FMI_PRIVATE_REAL_MODEL_574_GREEN_20260911.zip` and its checksum to connected Google Drive destination folder ID `1xMc3KHQhN1wk5gZ2ZsP93aLe4QoQa-4h` using a connector-native file handle.
+          5. Read the Drive copy back independently. Require exactly 2,498,182 bytes and SHA-256 `ff522be1fe8bfb680c1ae67abdc5dd732707dbf4ff4384bb009783d0312a746e`; verify the checksum sibling agrees.
+          6. Update the FMI checkpoint pointer/evidence on the working branch with Drive file IDs, upload status, and exact readback SHA. Admit evidence/pointer only; do not weaken source authority.
+          7. Update PR #9 to the current V10 + Drive-roundtrip state while keeping it OPEN, DRAFT, and UNMERGED.
+          8. Reverify working branch HEAD, sealed `main` exact `564bef47bc2cf7a477a904594bc9b6cd294d075e`, PR #9 draft/unmerged, authority locks, provider spend USD 0, and all evidence gates.
+          9. If and only if every required completion/certification gate is green, proceed to deployment. Cloudflare may be used for the zero-cost security/edge layer, but Cloudflare Workers AI must never be represented as the exact private/local Qwen+Phi qualification surface. No live trading or model-authorized trades are implied by deployment.
+          EOF
+
+          cat > handoff/TRANSPORT/TRANSPORT_BOUNDARY.md <<'EOF'
+          # Transport boundary
+
+          This archive is intentionally a non-secret continuation envelope. It was constructed on a public zero-cost transport builder only because the chat's local container backend was unavailable.
+
+          NOT included in this public transport:
+          - private repository source bytes;
+          - private prompts/customer payloads;
+          - credentials/tokens;
+          - Qwen/Phi GGUF bytes;
+          - the sealed private real-model checkpoint bytes.
+
+          Those are not lost. The exact private source is pinned by Git commit/tree and must be re-read from connected GitHub. The sealed checkpoint is pinned by exact byte count/SHA/manifest and remains available from the completed authenticated V10 artifact path until its Drive roundtrip is completed.
+
+          The archive exists to make a chat shift lossless without weakening source confidentiality. It must never override a newer verified private GitHub state.
+          EOF
+
+          (cd handoff && find . -type f ! -name INTERNAL_MANIFEST_SHA256.txt -print0 | sort -z | xargs -0 sha256sum > INTERNAL_MANIFEST_SHA256.txt)
+          test -s handoff/INTERNAL_MANIFEST_SHA256.txt
+
+      - name: Upload authoritative handoff artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: MUSITU_FMI_WHOLE_CONTINUATION_HANDOFF_20260912_AUTHORITATIVE
+          path: handoff/
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 30
+
+      - name: Record artifact digest
+        shell: bash
+        run: |
+          echo "ARTIFACT_SHA256=${{ steps.upload.outputs.artifact-digest }}"
+          echo "ARTIFACT_ID=${{ steps.upload.outputs.artifact-id }}"
