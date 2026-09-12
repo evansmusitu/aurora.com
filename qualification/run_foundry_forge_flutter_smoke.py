@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Public, source-free Flutter dependency/toolchain smoke for FORGE client work.
+
+This script intentionally contains no MUSITU product source, schemas, endpoints,
+keys, customer data, or private artifacts. It exercises only public Flutter
+packages and generic platform compilation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+PUBSPEC = r'''name: universal_toolchain_smoke
+description: Public generic cross-platform Flutter dependency smoke.
+publish_to: none
+version: 0.0.1+1
+
+environment:
+  sdk: ">=3.12.0 <4.0.0"
+  flutter: ">=3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  camera: 0.12.1
+  connectivity_plus: 7.3.1
+  crypto: 3.0.7
+  cryptography: 2.9.0
+  file_selector: 1.1.0
+  flutter_secure_storage: 11.1.1
+  http: 1.6.0
+  path_provider: 2.1.6
+  sembast: 3.8.10
+  sembast_web: 2.4.5+1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: 6.0.0
+
+flutter:
+  uses-material-design: true
+'''
+
+MAIN = r'''import 'dart:convert';
+
+import 'package:camera/camera.dart' as camera;
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:cryptography/cryptography.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+
+import 'db.dart';
+
+Future<void> publicDependencyProbe() async {
+  final cipher = AesGcm.with256bits();
+  final key = await cipher.newSecretKey();
+  final box = await cipher.encrypt(utf8.encode('smoke'), secretKey: key);
+  await cipher.decrypt(box, secretKey: key);
+  const FlutterSecureStorage();
+  final client = http.Client();
+  client.close();
+  Connectivity();
+  const XTypeGroup(label: 'media', extensions: ['jpg']);
+  camera.availableCameras;
+  getApplicationSupportDirectory;
+  databaseFactoryMarker();
+}
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await publicDependencyProbe();
+  runApp(const MaterialApp(home: Scaffold(body: Text('public toolchain smoke'))));
+}
+'''
+
+DB = r'''import 'db_stub.dart'
+    if (dart.library.io) 'db_io.dart'
+    if (dart.library.js_interop) 'db_web.dart' as platform;
+
+Object databaseFactoryMarker() => platform.databaseFactoryMarker();
+'''
+
+DB_IO = r'''import 'package:sembast/sembast_io.dart';
+
+Object databaseFactoryMarker() => databaseFactoryIo;
+'''
+
+DB_WEB = r'''import 'package:sembast_web/sembast_web.dart';
+
+Object databaseFactoryMarker() => databaseFactoryWeb;
+'''
+
+DB_STUB = r'''Object databaseFactoryMarker() => 'unsupported';
+'''
+
+TEST = r'''import 'package:cryptography/cryptography.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('AES-GCM dependency is available', () {
+    expect(AesGcm.with256bits().nonceLength, greaterThan(0));
+  });
+}
+'''
+
+
+def run(*args: str, cwd: Path) -> None:
+    print('+', ' '.join(args), flush=True)
+    subprocess.run(args, cwd=cwd, check=True)
+
+
+def write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding='utf-8')
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--target', required=True, choices=['web', 'android', 'linux', 'windows', 'macos', 'ios'])
+    args = parser.parse_args()
+
+    with tempfile.TemporaryDirectory(prefix='forge-flutter-smoke-') as tmp:
+      root = Path(tmp)
+      platform = 'android' if args.target == 'android' else args.target
+      run(
+          'flutter', 'create', '--org', 'dev.musitu.publicsmoke',
+          '--project-name', 'universal_toolchain_smoke',
+          f'--platforms={platform}', '.', cwd=root,
+      )
+      write(root / 'pubspec.yaml', PUBSPEC)
+      write(root / 'lib' / 'main.dart', MAIN)
+      write(root / 'lib' / 'db.dart', DB)
+      write(root / 'lib' / 'db_io.dart', DB_IO)
+      write(root / 'lib' / 'db_web.dart', DB_WEB)
+      write(root / 'lib' / 'db_stub.dart', DB_STUB)
+      shutil.rmtree(root / 'test', ignore_errors=True)
+      write(root / 'test' / 'dependency_smoke_test.dart', TEST)
+
+      run('flutter', 'pub', 'get', cwd=root)
+      run('flutter', 'analyze', '--no-fatal-infos', cwd=root)
+      run('flutter', 'test', cwd=root)
+
+      commands = {
+          'web': ('flutter', 'build', 'web'),
+          'android': ('flutter', 'build', 'apk', '--debug'),
+          'linux': ('flutter', 'build', 'linux', '--debug'),
+          'windows': ('flutter', 'build', 'windows', '--debug'),
+          'macos': ('flutter', 'build', 'macos', '--debug'),
+          'ios': ('flutter', 'build', 'ios', '--simulator', '--debug'),
+      }
+      run(*commands[args.target], cwd=root)
+      print(f'PUBLIC_TOOLCHAIN_SMOKE_PASS target={args.target}', flush=True)
+
+
+if __name__ == '__main__':
+    main()
