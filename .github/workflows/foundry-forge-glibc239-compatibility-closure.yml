@@ -1,0 +1,56 @@
+name: Foundry Forge glibc 2.39 compatibility closure
+
+on:
+  push:
+    branches: [foundry-forge-qualification-20260911]
+    paths: [.github/workflows/foundry-forge-glibc239-compatibility-closure.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  closure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact target and materialize closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p closure/lib/x86_64-linux-gnu evidence
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, platform, shutil
+          assert platform.system() == 'Linux'
+          assert platform.machine() == 'x86_64'
+          assert platform.libc_ver() == ('glibc','2.39'), platform.libc_ver()
+          expected = {
+            'libpthread.so.0':'a27ffa9bf233d61a5f02ddb0cf770dd6579021afc1aa8aec0fb58ee4a965281a',
+            'libdl.so.2':'292d5f5af2e7360b3e18c56591a4960115373ecf40627660f9149b6c68a33f80',
+            'librt.so.1':'c6e6288545e24b0b3cfbf33320bda9236521625d8c3d628f3444f1ed40e5c7c5',
+            'libutil.so.1':'0f3f158a3bddc74152a56ae8d2be659485f90dd9abbca92d25961f973672d2f5',
+          }
+          rows=[]
+          for name,want in expected.items():
+            logical=Path('/lib/x86_64-linux-gnu')/name
+            real=Path(os.path.realpath(logical))
+            data=real.read_bytes(); got=hashlib.sha256(data).hexdigest()
+            assert got==want,(name,got,want)
+            dst=Path('closure/lib/x86_64-linux-gnu')/name
+            shutil.copy2(real,dst)
+            rows.append({'soname':name,'source_logical_path':str(logical),'source_real_path':str(real),'bytes':len(data),'sha256':got})
+          obj={'schema':'musitu.foundry_forge.glibc239_manylinux_compatibility_closure.v1','target':{'system':'Linux','machine':'x86_64','glibc':'2.39'},'components':rows,'private_product_bytes_included':False}
+          Path('evidence/GLIBC239_COMPATIBILITY_CLOSURE.json').write_text(json.dumps(obj,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(obj,sort_keys=True))
+          PY
+          sha256sum closure/lib/x86_64-linux-gnu/* | sort | tee evidence/SHA256SUMS.txt
+
+      - name: Upload compatibility closure
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: foundry-forge-glibc239-manylinux-compatibility-closure
+          path: |
+            closure/
+            evidence/
+          if-no-files-found: error
+          compression-level: 0
