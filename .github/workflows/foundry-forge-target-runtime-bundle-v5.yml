@@ -1,0 +1,178 @@
+name: Foundry Forge exact target runtime bundle v5
+
+on:
+  push:
+    branches: [foundry-forge-qualification-20260911]
+    paths: [.github/workflows/foundry-forge-target-runtime-bundle-v5.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Set up exact CPython 3.12.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12.13'
+          architecture: x64
+          cache: ''
+
+      - name: Verify exact target platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import platform, sys
+          assert sys.version_info[:3] == (3, 12, 13), sys.version
+          assert platform.system() == 'Linux'
+          assert platform.machine() == 'x86_64'
+          assert platform.libc_ver() == ('glibc', '2.39'), platform.libc_ver()
+          PY
+
+      - name: Recover and verify successful v4 rootfs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p v4-artifact runtime-rootfs runtime-evidence
+          gh api /repos/evansmusitu/aurora.com/actions/artifacts/10291615207/zip > v4-artifact.zip
+          echo 'eee641137c70a4b1a1fef35338a997299d7350b50e0092480e411c0da8de87dc  v4-artifact.zip' | sha256sum -c -
+          unzip -q v4-artifact.zip -d v4-artifact
+          echo '5d3695da0862fb67f10bf03829f621f158c9f7c25b7f1a6015a83cc057bcdb50  v4-artifact/foundry-forge-exact-target-runtime-ubuntu2404-cpython31213-v4.tgz' | sha256sum -c -
+          echo '1a2af84d4242bce23ec44606d0adf928a1d3990c9d236a453988c7ea5f99a4fa  v4-artifact/runtime-evidence/RUNTIME_ROOTFS_MANIFEST.json' | sha256sum -c -
+          tar -xzf v4-artifact/foundry-forge-exact-target-runtime-ubuntu2404-cpython31213-v4.tgz -C runtime-rootfs
+          cp -a v4-artifact/runtime-evidence/* runtime-evidence/
+          printf '%s\n' \
+            'parent_artifact_id=10291615207' \
+            'parent_run_id=34671922706' \
+            'parent_commit=da478ebde2457ba047372adb8f977f02486fab52' \
+            'parent_artifact_sha256=eee641137c70a4b1a1fef35338a997299d7350b50e0092480e411c0da8de87dc' \
+            'parent_tgz_sha256=5d3695da0862fb67f10bf03829f621f158c9f7c25b7f1a6015a83cc057bcdb50' \
+            > runtime-evidence/V4_PARENT_CUSTODY.txt
+
+      - name: Admit exact glibc manylinux compatibility sonames
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/runtime-rootfs"
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, shutil
+          root = Path('runtime-rootfs')
+          names = ('libpthread.so.0', 'libdl.so.2', 'librt.so.1', 'libutil.so.1')
+          rows = []
+          for name in names:
+              logical = Path('/lib/x86_64-linux-gnu') / name
+              if not logical.exists():
+                  raise SystemExit(f'missing required target-runtime soname: {logical}')
+              real = Path(os.path.realpath(logical))
+              if not real.is_file():
+                  raise SystemExit(f'non-file target-runtime soname: {logical} -> {real}')
+              h = hashlib.sha256(real.read_bytes()).hexdigest()
+              for destination in {logical, real, Path('/usr/lib/x86_64-linux-gnu') / name}:
+                  dst = root / destination.relative_to('/')
+                  dst.parent.mkdir(parents=True, exist_ok=True)
+                  if dst.exists() or dst.is_symlink():
+                      dst.unlink()
+                  shutil.copy2(real, dst)
+              rows.append({'soname': name, 'logical_path': str(logical), 'real_path': str(real), 'bytes': real.stat().st_size, 'sha256': h})
+          Path('runtime-evidence/GLIBC_MANYLINUX_COMPATIBILITY_CLOSURE.json').write_text(
+              json.dumps({'schema':'musitu.foundry_forge.glibc_manylinux_compatibility_closure.v1','target_glibc':'2.39','components':rows}, indent=2, sort_keys=True) + '\n'
+          )
+          print(json.dumps(rows, sort_keys=True))
+          PY
+
+      - name: Recover exact admitted Python wheels for isolated compatibility proof
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p admitted-artifact admitted-qualified runtime-rootfs/tmp/admitted-python
+          gh api /repos/evansmusitu/aurora.com/actions/artifacts/10279850017/zip > admitted-artifact.zip
+          echo '7c7ef782d0a40b166bd966145bedb04a9e34aa4ad338a19d341ead3b3e07259f  admitted-artifact.zip' | sha256sum -c -
+          unzip -q admitted-artifact.zip -d admitted-artifact
+          echo '031edc6ae21d545c7a7e9801ed55dad8b3ace89aeb7f4cf9a1e5f51837f02fa2  admitted-artifact/foundry-forge-public-dependency-qualification.tgz' | sha256sum -c -
+          tar -xzf admitted-artifact/foundry-forge-public-dependency-qualification.tgz -C admitted-qualified
+          for wheel in admitted-qualified/wheels/*.whl; do unzip -q -o "$wheel" -d runtime-rootfs/tmp/admitted-python; done
+          echo '51afcfceb15597cf2635068e4ac9a56b2abde622edde17f37d85fd7b5306497a  admitted-qualified/wheels/cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl' | sha256sum -c -
+          echo 'c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf  admitted-qualified/wheels/cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl' | sha256sum -c -
+
+      - name: Prove admitted native wheels and Tesseract inside isolated root
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/runtime-rootfs"
+          PYBASE=/opt/hostedtoolcache/Python/3.12.13/x64
+          sudo chroot "$ROOT" /usr/bin/env -i \
+            PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 PYTHONPATH=/tmp/admitted-python \
+            LD_LIBRARY_PATH="$PYBASE/lib" \
+            "$PYBASE/bin/python3.12" -S - <<'PY' | tee runtime-evidence/CHROOT_ADMITTED_WHEEL_COMPATIBILITY.txt
+          import importlib.metadata, json, platform, sys
+          import cryptography, pypdf, pypdfium2
+          from cryptography.hazmat.backends.openssl.backend import backend
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          assert sys.version_info[:3] == (3,12,13)
+          assert platform.libc_ver() == ('glibc','2.39')
+          assert cryptography.__version__ == '50.0.1'
+          assert pypdf.__version__ == '6.18.0'
+          assert importlib.metadata.version('pypdfium2') == '5.13.0'
+          assert importlib.metadata.version('cffi') == '2.1.1'
+          assert importlib.metadata.version('pycparser') == '3.0'
+          key=Ed25519PrivateKey.generate(); msg=b'MUSITU_V5_COMPATIBILITY'; sig=key.sign(msg); key.public_key().verify(sig,msg)
+          openssl=backend.openssl_version_text(); assert openssl.startswith('OpenSSL 4.0.2 '), openssl
+          print(json.dumps({'python':platform.python_version(),'libc':platform.libc_ver(),'cryptography':cryptography.__version__,'openssl':openssl,'ed25519':'PASS'},sort_keys=True))
+          PY
+          sudo chroot "$ROOT" /usr/bin/env -i \
+            LD_LIBRARY_PATH=/opt/musitu/tesseract-5.5.3/lib:"$PYBASE/lib" \
+            TESSDATA_PREFIX=/opt/musitu/tesseract-5.5.3/share/tessdata \
+            /opt/musitu/tesseract-5.5.3/bin/tesseract --list-langs \
+            | tee runtime-evidence/CHROOT_TESSERACT_LANGS_V5.txt
+          grep -Fx eng runtime-evidence/CHROOT_TESSERACT_LANGS_V5.txt
+          grep -Fx osd runtime-evidence/CHROOT_TESSERACT_LANGS_V5.txt
+          rm -rf runtime-rootfs/tmp/admitted-python
+
+      - name: Create deterministic v5 runtime bundle and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, stat
+          root=Path('runtime-rootfs'); rows=[]
+          for p in sorted(root.rglob('*'),key=lambda x:x.relative_to(root).as_posix()):
+              rel=p.relative_to(root).as_posix()
+              if p.is_symlink(): rows.append({'path':rel,'type':'symlink','target':os.readlink(p)})
+              elif p.is_file():
+                  h=hashlib.sha256()
+                  with p.open('rb') as f:
+                      for c in iter(lambda:f.read(1048576),b''): h.update(c)
+                  rows.append({'path':rel,'type':'file','bytes':p.stat().st_size,'mode':oct(stat.S_IMODE(p.stat().st_mode)),'sha256':h.hexdigest()})
+          obj={
+            'schema':'musitu.foundry_forge.exact_target_runtime_bundle.v5',
+            'target':{'python':'3.12.13','system':'Linux','machine':'x86_64','glibc':'2.39'},
+            'parent_v4':{'artifact_id':10291615207,'run_id':34671922706,'commit':'da478ebde2457ba047372adb8f977f02486fab52','artifact_sha256':'eee641137c70a4b1a1fef35338a997299d7350b50e0092480e411c0da8de87dc','tgz_sha256':'5d3695da0862fb67f10bf03829f621f158c9f7c25b7f1a6015a83cc057bcdb50'},
+            'compatibility_closure':'runtime-evidence/GLIBC_MANYLINUX_COMPATIBILITY_CLOSURE.json',
+            'files':rows,'file_count':len(rows),'private_product_bytes_included':False,
+            'isolated_chroot_self_test':True,'admitted_python_wheel_native_compatibility_proven':True,
+          }
+          Path('runtime-evidence/RUNTIME_ROOTFS_MANIFEST_V5.json').write_text(json.dumps(obj,indent=2,sort_keys=True)+'\n')
+          PY
+          tar --numeric-owner --sort=name --mtime='UTC 2026-09-12 00:00:00' --owner=0 --group=0 -C runtime-rootfs -czf foundry-forge-exact-target-runtime-ubuntu2404-cpython31213-v5.tgz .
+          sha256sum foundry-forge-exact-target-runtime-ubuntu2404-cpython31213-v5.tgz | tee runtime-evidence/RUNTIME_BUNDLE_V5_SHA256.txt
+          sha256sum runtime-evidence/RUNTIME_ROOTFS_MANIFEST_V5.json | tee runtime-evidence/RUNTIME_MANIFEST_V5_SHA256.txt
+
+      - name: Persist exact target runtime bundle v5
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: foundry-forge-exact-target-runtime-ubuntu2404-cpython31213-v5
+          path: |
+            foundry-forge-exact-target-runtime-ubuntu2404-cpython31213-v5.tgz
+            runtime-evidence/
+          if-no-files-found: error
+          compression-level: 0
