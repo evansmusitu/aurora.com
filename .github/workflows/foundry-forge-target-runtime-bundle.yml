@@ -9,11 +9,12 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   bundle:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 35
     steps:
       - name: Set up exact CPython 3.12.13
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -35,98 +36,119 @@ jobs:
           libc_name, libc_ver = platform.libc_ver()
           assert libc_name == 'glibc', (libc_name, libc_ver)
           assert libc_ver == '2.39', libc_ver
-          out = {'python': platform.python_version(), 'implementation': platform.python_implementation(), 'system': platform.system(), 'machine': platform.machine(), 'libc': {'name': libc_name, 'version': libc_ver}, 'executable': sys.executable, 'prefix': sys.prefix}
+          out = {
+              'python': platform.python_version(),
+              'implementation': platform.python_implementation(),
+              'system': platform.system(),
+              'machine': platform.machine(),
+              'libc': {'name': libc_name, 'version': libc_ver},
+              'executable': sys.executable,
+              'prefix': sys.prefix,
+          }
           open('runtime-evidence/PLATFORM.json','w').write(json.dumps(out, indent=2, sort_keys=True) + '\n')
           print(json.dumps(out, sort_keys=True))
           PY
 
-      - name: Recreate exact qualified Tesseract 5.5.3
+      - name: Recover exact previously-qualified Tesseract bytes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p prior-artifact prior-qualified
+          gh api /repos/evansmusitu/aurora.com/actions/artifacts/10279850017/zip > prior-artifact.zip
+          echo '7c7ef782d0a40b166bd966145bedb04a9e34aa4ad338a19d341ead3b3e07259f  prior-artifact.zip' | sha256sum -c -
+          unzip -q prior-artifact.zip -d prior-artifact
+          test -f prior-artifact/foundry-forge-public-dependency-qualification.tgz
+          echo '031edc6ae21d545c7a7e9801ed55dad8b3ace89aeb7f4cf9a1e5f51837f02fa2  prior-artifact/foundry-forge-public-dependency-qualification.tgz' | sha256sum -c -
+          tar -xzf prior-artifact/foundry-forge-public-dependency-qualification.tgz -C prior-qualified
+          echo '6ad0afbf020337487c0d103421e430f5e22ed8eefc0eb7420af002a850d1a1e8  prior-qualified/tesseract-5.5.3/bin/tesseract' | sha256sum -c -
+          echo '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2  prior-qualified/tessdata/eng.traineddata' | sha256sum -c -
+          echo '9cf5d576fcc47564f11265841e5ca839001e7e6f38ff7f7aacf46d15a96b00ff  prior-qualified/tessdata/osd.traineddata' | sha256sum -c -
+          cp -a prior-qualified/tessdata/eng.traineddata prior-qualified/tesseract-5.5.3/share/tessdata/eng.traineddata
+          cp -a prior-qualified/tessdata/osd.traineddata prior-qualified/tesseract-5.5.3/share/tessdata/osd.traineddata
+          printf '%s\n' 'artifact_id=10279850017' 'source_run=34638537263' 'source_job=103392280096' 'source_commit=53eb063edc504785d8bf1fb173c724ddd35623ab' > runtime-evidence/ADMITTED_TESSERACT_CUSTODY.txt
+
+      - name: Install pinned Ubuntu runtime dependency set
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            autoconf automake libtool pkg-config make g++ ca-certificates curl git \
             libleptonica-dev=1.82.0-3build4 libpng-dev=1.6.43-5ubuntu0.6 \
             libjpeg-dev=8c-2ubuntu11 libtiff-dev=4.5.1+git230720-4ubuntu2.5 \
             zlib1g-dev=1:1.3.dfsg-3.1ubuntu2.2 libwebp-dev=1.3.2-0.4build3 \
             libopenjp2-7-dev=2.5.0-2ubuntu0.5 libcairo2-dev=1.18.0-3build1 \
             libpango1.0-dev=1.52.1+ds-1build1 libicu-dev=74.2-1ubuntu3.1 \
             libarchive-dev=3.7.2-2ubuntu0.8 libcurl4-openssl-dev=8.5.0-2ubuntu10.13 \
-            librsvg2-bin=2.58.0+dfsg-1build1 fonts-dejavu-core=2.37-8
+            fonts-dejavu-core=2.37-8
           dpkg-query -W -f='${Package}\t${Version}\n' \
             libleptonica-dev libpng-dev libjpeg-dev libtiff-dev zlib1g-dev \
             libwebp-dev libopenjp2-7-dev libcairo2-dev libpango1.0-dev \
-            libicu-dev libarchive-dev libcurl4-openssl-dev librsvg2-bin fonts-dejavu-core \
-            | sort > runtime-evidence/BUILD_DEPENDENCIES.tsv
+            libicu-dev libarchive-dev libcurl4-openssl-dev fonts-dejavu-core \
+            | sort > runtime-evidence/RUNTIME_DEPENDENCIES.tsv
 
-          git init tesseract-src
-          git -C tesseract-src remote add origin https://github.com/tesseract-ocr/tesseract.git
-          git -C tesseract-src fetch --depth 1 origin refs/tags/5.5.3:refs/tags/5.5.3
-          TAG_OBJECT=$(git -C tesseract-src rev-parse 'refs/tags/5.5.3^{tag}')
-          COMMIT=$(git -C tesseract-src rev-parse 'refs/tags/5.5.3^{commit}')
-          test "$TAG_OBJECT" = '6951ffe10ce031374bcd04fe400811da1e7e04ad'
-          test "$COMMIT" = 'db0ec62f81b0737fbbe184d8fea40af5738f8eef'
-          git -C tesseract-src checkout --detach "$COMMIT"
-          pushd tesseract-src
-          ./autogen.sh
-          ./configure --prefix="$GITHUB_WORKSPACE/tesseract-5.5.3"
-          make -j2
-          make install
-          popd
-
-          echo '6ad0afbf020337487c0d103421e430f5e22ed8eefc0eb7420af002a850d1a1e8  tesseract-5.5.3/bin/tesseract' | sha256sum -c -
-          TESSDATA_COMMIT='87416418657359cb625c412a48b6e1d6d41c29bd'
-          mkdir -p tesseract-5.5.3/share/tessdata
-          for lang in eng osd; do
-            curl --fail --location --retry 3 "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/${TESSDATA_COMMIT}/${lang}.traineddata" -o "tesseract-5.5.3/share/tessdata/${lang}.traineddata"
-          done
-          echo '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2  tesseract-5.5.3/share/tessdata/eng.traineddata' | sha256sum -c -
-          echo '9cf5d576fcc47564f11265841e5ca839001e7e6f38ff7f7aacf46d15a96b00ff  tesseract-5.5.3/share/tessdata/osd.traineddata' | sha256sum -c -
-          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/tesseract-5.5.3/lib" TESSDATA_PREFIX="$GITHUB_WORKSPACE/tesseract-5.5.3/share/tessdata" tesseract-5.5.3/bin/tesseract --list-langs | tee runtime-evidence/TESSERACT_LANGS.txt
+          TESS="$GITHUB_WORKSPACE/prior-qualified/tesseract-5.5.3"
+          LD_LIBRARY_PATH="$TESS/lib:${LD_LIBRARY_PATH:-}" TESSDATA_PREFIX="$TESS/share/tessdata" "$TESS/bin/tesseract" --version | tee runtime-evidence/TESSERACT_VERSION.txt
+          head -n1 runtime-evidence/TESSERACT_VERSION.txt | grep -Fx 'tesseract 5.5.3'
+          LD_LIBRARY_PATH="$TESS/lib:${LD_LIBRARY_PATH:-}" TESSDATA_PREFIX="$TESS/share/tessdata" "$TESS/bin/tesseract" --list-langs | tee runtime-evidence/TESSERACT_LANGS.txt
           grep -Fx 'eng' runtime-evidence/TESSERACT_LANGS.txt
           grep -Fx 'osd' runtime-evidence/TESSERACT_LANGS.txt
+          LD_LIBRARY_PATH="$TESS/lib:${LD_LIBRARY_PATH:-}" ldd "$TESS/bin/tesseract" | tee runtime-evidence/TESSERACT_LDD_CURRENT_CLOSURE.txt
+          ! grep -q 'not found' runtime-evidence/TESSERACT_LDD_CURRENT_CLOSURE.txt
 
-      - name: Capture exact runtime rootfs and library closure
+      - name: Capture exact runtime rootfs and resolved library closure
         shell: bash
         run: |
           set -euo pipefail
           ROOT="$GITHUB_WORKSPACE/runtime-rootfs"
           PYBASE=$(python -c 'import sys; print(sys.prefix)')
-          mkdir -p "$ROOT$(dirname "$PYBASE")" "$ROOT/opt/musitu" "$ROOT/etc"
+          TESS="$GITHUB_WORKSPACE/prior-qualified/tesseract-5.5.3"
+          mkdir -p "$ROOT$(dirname "$PYBASE")" "$ROOT/opt/musitu" "$ROOT/etc" "$ROOT/usr/bin"
           cp -a "$PYBASE" "$ROOT$(dirname "$PYBASE")/"
-          cp -a "$GITHUB_WORKSPACE/tesseract-5.5.3" "$ROOT/opt/musitu/"
+          cp -a "$TESS" "$ROOT/opt/musitu/tesseract-5.5.3"
           cp -a /etc/os-release "$ROOT/etc/os-release"
-          mkdir -p "$ROOT/usr/bin" "$ROOT/bin"
-          cp -a /usr/bin/env "$ROOT/usr/bin/env"
-          cp -a /bin/sh "$ROOT/bin/sh"
+          cp -L /usr/bin/env "$ROOT/usr/bin/env"
 
           python - <<'PY'
           from pathlib import Path
           import os, re, shutil, subprocess
-          root=Path(os.environ['GITHUB_WORKSPACE'])/'runtime-rootfs'
-          pybase=Path(subprocess.check_output(['python','-c','import sys;print(sys.prefix)'], text=True).strip())
-          seeds=[Path('/usr/bin/env'),Path('/bin/sh'),Path(os.environ['GITHUB_WORKSPACE'])/'tesseract-5.5.3/bin/tesseract',Path(os.environ['GITHUB_WORKSPACE'])/'tesseract-5.5.3/lib/libtesseract.so.5.0.5']
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          root = workspace / 'runtime-rootfs'
+          pybase = Path(subprocess.check_output(['python','-c','import sys;print(sys.prefix)'], text=True).strip())
+          tess = workspace / 'prior-qualified/tesseract-5.5.3'
+          seeds = [Path('/usr/bin/env'), tess/'bin/tesseract', tess/'lib/libtesseract.so.5.0.5']
           for p in pybase.rglob('*'):
-              if p.is_file() and (os.access(p, os.X_OK) or '.so' in p.name): seeds.append(p)
+              if p.is_file() and (os.access(p, os.X_OK) or '.so' in p.name):
+                  seeds.append(p)
+          env = os.environ.copy()
+          env['LD_LIBRARY_PATH'] = f"{tess/'lib'}:{pybase/'lib'}:" + env.get('LD_LIBRARY_PATH','')
           deps=set()
+          unresolved=[]
           for seed in seeds:
-              try: out=subprocess.check_output(['ldd',str(seed)],stderr=subprocess.DEVNULL,text=True)
-              except Exception: continue
+              try:
+                  out=subprocess.check_output(['ldd',str(seed)],stderr=subprocess.STDOUT,text=True,env=env)
+              except Exception:
+                  continue
+              if 'not found' in out:
+                  unresolved.append({'seed': str(seed), 'ldd': out})
               for line in out.splitlines():
-                  for m in re.finditer(r'(/[^\s()]+)',line):
+                  for m in re.finditer(r'(/[^\s()]+)', line):
                       p=Path(m.group(1))
                       if p.exists(): deps.add(p)
-          for p in sorted(deps):
+          if unresolved:
+              raise SystemExit('unresolved dynamic dependencies: ' + repr(unresolved))
+          for p in sorted(deps, key=str):
               real=Path(os.path.realpath(p))
-              for src in {p,real}:
+              for src in (p, real):
                   dst=root/src.relative_to('/')
                   dst.parent.mkdir(parents=True,exist_ok=True)
                   if src.is_symlink():
                       if dst.exists() or dst.is_symlink(): dst.unlink()
                       os.symlink(os.readlink(src),dst)
-                  elif src.is_file(): shutil.copy2(src,dst)
-          print('dependency_files',len(deps))
+                  elif src.is_file():
+                      shutil.copy2(src,dst)
+          print('resolved_dependency_paths', len(deps))
           PY
 
           PYEXE="$PYBASE/bin/python3.12"
@@ -137,9 +159,15 @@ jobs:
           assert platform.libc_ver() == ('glibc','2.39'), platform.libc_ver()
           print(json.dumps({'python':platform.python_version(),'machine':platform.machine(),'libc':platform.libc_ver()},sort_keys=True))
           PY
-          sudo chroot "$ROOT" /usr/bin/env LD_LIBRARY_PATH=/opt/musitu/tesseract-5.5.3/lib TESSDATA_PREFIX=/opt/musitu/tesseract-5.5.3/share/tessdata /opt/musitu/tesseract-5.5.3/bin/tesseract --list-langs | tee runtime-evidence/CHROOT_TESSERACT_LANGS.txt
+          sudo chroot "$ROOT" /usr/bin/env -i \
+            LD_LIBRARY_PATH=/opt/musitu/tesseract-5.5.3/lib:"$PYBASE/lib" \
+            TESSDATA_PREFIX=/opt/musitu/tesseract-5.5.3/share/tessdata \
+            /opt/musitu/tesseract-5.5.3/bin/tesseract --list-langs \
+            | tee runtime-evidence/CHROOT_TESSERACT_LANGS.txt
           grep -Fx 'eng' runtime-evidence/CHROOT_TESSERACT_LANGS.txt
           grep -Fx 'osd' runtime-evidence/CHROOT_TESSERACT_LANGS.txt
+          sha256sum "$ROOT/opt/musitu/tesseract-5.5.3/bin/tesseract" | tee runtime-evidence/CHROOT_TESSERACT_BINARY_SHA256.txt
+          grep -Fx '6ad0afbf020337487c0d103421e430f5e22ed8eefc0eb7420af002a850d1a1e8  '"$ROOT/opt/musitu/tesseract-5.5.3/bin/tesseract" runtime-evidence/CHROOT_TESSERACT_BINARY_SHA256.txt
 
       - name: Hash and package exact runtime bundle
         shell: bash
@@ -152,11 +180,24 @@ jobs:
           rows=[]
           for p in sorted(root.rglob('*'), key=lambda x:x.relative_to(root).as_posix()):
               rel=p.relative_to(root).as_posix()
-              if p.is_symlink(): rows.append({'path':rel,'type':'symlink','target':os.readlink(p)})
+              if p.is_symlink():
+                  rows.append({'path':rel,'type':'symlink','target':os.readlink(p)})
               elif p.is_file():
-                  h=hashlib.sha256(p.read_bytes()).hexdigest()
-                  rows.append({'path':rel,'type':'file','bytes':p.stat().st_size,'mode':oct(stat.S_IMODE(p.stat().st_mode)),'sha256':h})
-          manifest={'schema':'musitu.foundry_forge.exact_target_runtime_bundle.v1','target':{'python':'3.12.13','system':'Linux','machine':'x86_64','glibc':'2.39'},'tesseract_binary_sha256':'6ad0afbf020337487c0d103421e430f5e22ed8eefc0eb7420af002a850d1a1e8','tessdata_fast_commit':'87416418657359cb625c412a48b6e1d6d41c29bd','files':rows,'file_count':len(rows),'private_product_bytes_included':False}
+                  h=hashlib.sha256()
+                  with p.open('rb') as f:
+                      for chunk in iter(lambda:f.read(1024*1024), b''): h.update(chunk)
+                  rows.append({'path':rel,'type':'file','bytes':p.stat().st_size,'mode':oct(stat.S_IMODE(p.stat().st_mode)),'sha256':h.hexdigest()})
+          manifest={
+              'schema':'musitu.foundry_forge.exact_target_runtime_bundle.v2',
+              'target':{'python':'3.12.13','system':'Linux','machine':'x86_64','glibc':'2.39'},
+              'python_source':'actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97',
+              'tesseract_source_artifact':{'artifact_id':10279850017,'run_id':34638537263,'job_id':103392280096,'artifact_sha256':'7c7ef782d0a40b166bd966145bedb04a9e34aa4ad338a19d341ead3b3e07259f','internal_tgz_sha256':'031edc6ae21d545c7a7e9801ed55dad8b3ace89aeb7f4cf9a1e5f51837f02fa2'},
+              'tesseract_binary_sha256':'6ad0afbf020337487c0d103421e430f5e22ed8eefc0eb7420af002a850d1a1e8',
+              'tessdata_fast_commit':'87416418657359cb625c412a48b6e1d6d41c29bd',
+              'files':rows,
+              'file_count':len(rows),
+              'private_product_bytes_included':False,
+          }
           Path('runtime-evidence/RUNTIME_ROOTFS_MANIFEST.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
           PY
           tar --numeric-owner --sort=name --mtime='UTC 2026-09-12 00:00:00' --owner=0 --group=0 -C runtime-rootfs -czf foundry-forge-exact-target-runtime-ubuntu2404-cpython31213.tgz .
@@ -170,9 +211,13 @@ jobs:
           path: |
             foundry-forge-exact-target-runtime-ubuntu2404-cpython31213.tgz
             runtime-evidence/PLATFORM.json
-            runtime-evidence/BUILD_DEPENDENCIES.tsv
+            runtime-evidence/ADMITTED_TESSERACT_CUSTODY.txt
+            runtime-evidence/RUNTIME_DEPENDENCIES.tsv
+            runtime-evidence/TESSERACT_VERSION.txt
             runtime-evidence/TESSERACT_LANGS.txt
+            runtime-evidence/TESSERACT_LDD_CURRENT_CLOSURE.txt
             runtime-evidence/CHROOT_TESSERACT_LANGS.txt
+            runtime-evidence/CHROOT_TESSERACT_BINARY_SHA256.txt
             runtime-evidence/RUNTIME_ROOTFS_MANIFEST.json
             runtime-evidence/RUNTIME_BUNDLE_SHA256.txt
             runtime-evidence/RUNTIME_MANIFEST_SHA256.txt
