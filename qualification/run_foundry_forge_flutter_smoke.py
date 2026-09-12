@@ -33,6 +33,7 @@ dependencies:
   file_selector: 1.1.0
   flutter_secure_storage: 11.1.1
   http: 1.6.0
+  image: 4.9.2
   path_provider: 2.1.6
   sembast: 3.8.10
   sembast_web: 2.4.5+1
@@ -55,6 +56,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as image;
 import 'package:path_provider/path_provider.dart';
 
 import 'db.dart';
@@ -77,6 +79,11 @@ Future<void> publicDependencyProbe() async {
 
   const mediaType = XTypeGroup(label: 'media', extensions: ['jpg']);
   if (mediaType.label.isEmpty) throw StateError('file selector probe failed');
+
+  final generated = image.Image(width: 2, height: 2)
+    ..clear(image.ColorRgb8(255, 255, 255));
+  final encoded = image.encodeJpg(generated);
+  if (encoded.isEmpty) throw StateError('image encode probe failed');
 
   final cameraFunction = camera.availableCameras;
   final supportDirectoryFunction = getApplicationSupportDirectory;
@@ -117,10 +124,14 @@ DB_STUB = r'''Object databaseFactoryMarker() => 'unsupported';
 
 TEST = r'''import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image;
 
 void main() {
-  test('AES-GCM dependency is available', () {
+  test('AES-GCM and image dependencies are available', () {
     expect(AesGcm.with256bits().nonceLength, greaterThan(0));
+    final generated = image.Image(width: 1, height: 1)
+      ..clear(image.ColorRgb8(0, 0, 0));
+    expect(image.encodeJpg(generated), isNotEmpty);
   });
 }
 '''
