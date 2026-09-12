@@ -1,0 +1,173 @@
+name: Foundry Forge exact target runtime bundle v3
+
+on:
+  push:
+    branches: [foundry-forge-qualification-20260911]
+    paths: [.github/workflows/foundry-forge-target-runtime-bundle-v3.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Set up exact CPython 3.12.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12.13'
+          architecture: x64
+          cache: ''
+
+      - name: Verify exact target platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-evidence
+          python - <<'PY'
+          import json, platform, sys
+          assert sys.version_info[:3] == (3,12,13), sys.version
+          assert platform.system() == 'Linux'
+          assert platform.machine() == 'x86_64'
+          assert platform.libc_ver() == ('glibc','2.39'), platform.libc_ver()
+          out={'python':platform.python_version(),'system':platform.system(),'machine':platform.machine(),'libc':platform.libc_ver(),'prefix':sys.prefix,'executable':sys.executable}
+          open('runtime-evidence/PLATFORM.json','w').write(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,sort_keys=True))
+          PY
+
+      - name: Recover exact admitted Tesseract artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p prior-artifact prior-qualified
+          gh api /repos/evansmusitu/aurora.com/actions/artifacts/10279850017/zip > prior-artifact.zip
+          echo '7c7ef782d0a40b166bd966145bedb04a9e34aa4ad338a19d341ead3b3e07259f  prior-artifact.zip' | sha256sum -c -
+          unzip -q prior-artifact.zip -d prior-artifact
+          echo '031edc6ae21d545c7a7e9801ed55dad8b3ace89aeb7f4cf9a1e5f51837f02fa2  prior-artifact/foundry-forge-public-dependency-qualification.tgz' | sha256sum -c -
+          tar -xzf prior-artifact/foundry-forge-public-dependency-qualification.tgz -C prior-qualified
+          echo '6ad0afbf020337487c0d103421e430f5e22ed8eefc0eb7420af002a850d1a1e8  prior-qualified/tesseract-5.5.3/bin/tesseract' | sha256sum -c -
+          echo '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2  prior-qualified/tessdata/eng.traineddata' | sha256sum -c -
+          echo '9cf5d576fcc47564f11265841e5ca839001e7e6f38ff7f7aacf46d15a96b00ff  prior-qualified/tessdata/osd.traineddata' | sha256sum -c -
+          cp -a prior-qualified/tessdata/eng.traineddata prior-qualified/tesseract-5.5.3/share/tessdata/eng.traineddata
+          cp -a prior-qualified/tessdata/osd.traineddata prior-qualified/tesseract-5.5.3/share/tessdata/osd.traineddata
+          printf '%s\n' 'artifact_id=10279850017' 'source_run=34638537263' 'source_job=103392280096' 'source_commit=53eb063edc504785d8bf1fb173c724ddd35623ab' > runtime-evidence/ADMITTED_TESSERACT_CUSTODY.txt
+
+      - name: Install pinned Ubuntu runtime closure inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libleptonica-dev=1.82.0-3build4 libpng-dev=1.6.43-5ubuntu0.6 \
+            libjpeg-dev=8c-2ubuntu11 libtiff-dev=4.5.1+git230720-4ubuntu2.5 \
+            zlib1g-dev=1:1.3.dfsg-3.1ubuntu2.2 libwebp-dev=1.3.2-0.4build3 \
+            libopenjp2-7-dev=2.5.0-2ubuntu0.5 libcairo2-dev=1.18.0-3build1 \
+            libpango1.0-dev=1.52.1+ds-1build1 libicu-dev=74.2-1ubuntu3.1 \
+            libarchive-dev=3.7.2-2ubuntu0.8 libcurl4-openssl-dev=8.5.0-2ubuntu10.13 \
+            fonts-dejavu-core=2.37-8
+          dpkg-query -W -f='${Package}\t${Version}\n' \
+            libleptonica-dev libpng-dev libjpeg-dev libtiff-dev zlib1g-dev libwebp-dev \
+            libopenjp2-7-dev libcairo2-dev libpango1.0-dev libicu-dev libarchive-dev \
+            libcurl4-openssl-dev fonts-dejavu-core | sort > runtime-evidence/RUNTIME_DEPENDENCIES.tsv
+          TESS="$GITHUB_WORKSPACE/prior-qualified/tesseract-5.5.3"
+          LD_LIBRARY_PATH="$TESS/lib:${LD_LIBRARY_PATH:-}" TESSDATA_PREFIX="$TESS/share/tessdata" "$TESS/bin/tesseract" --list-langs | tee runtime-evidence/TESSERACT_LANGS.txt
+          grep -Fx eng runtime-evidence/TESSERACT_LANGS.txt
+          grep -Fx osd runtime-evidence/TESSERACT_LANGS.txt
+          LD_LIBRARY_PATH="$TESS/lib:${LD_LIBRARY_PATH:-}" ldd "$TESS/bin/tesseract" | tee runtime-evidence/TESSERACT_LDD.txt
+          ! grep -q 'not found' runtime-evidence/TESSERACT_LDD.txt
+
+      - name: Materialize and self-test isolated rootfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/runtime-rootfs"
+          PYBASE=$(python -c 'import sys; print(sys.prefix)')
+          TESS="$GITHUB_WORKSPACE/prior-qualified/tesseract-5.5.3"
+          mkdir -p "$ROOT$PYBASE" "$ROOT/opt/musitu" "$ROOT/etc" "$ROOT/usr/bin"
+          cp -aL "$PYBASE"/. "$ROOT$PYBASE"/
+          cp -a "$TESS" "$ROOT/opt/musitu/tesseract-5.5.3"
+          cp -a /etc/os-release "$ROOT/etc/os-release"
+          cp -L /usr/bin/env "$ROOT/usr/bin/env"
+          test -x "$ROOT$PYBASE/bin/python3.12"
+
+          python - <<'PY'
+          from pathlib import Path
+          import os,re,shutil,subprocess
+          ws=Path(os.environ['GITHUB_WORKSPACE']); root=ws/'runtime-rootfs'
+          pybase=Path(subprocess.check_output(['python','-c','import sys;print(sys.prefix)'],text=True).strip())
+          tess=ws/'prior-qualified/tesseract-5.5.3'
+          seeds=[Path('/usr/bin/env'),tess/'bin/tesseract',tess/'lib/libtesseract.so.5.0.5']
+          seeds += [p for p in pybase.rglob('*') if p.is_file() and (os.access(p,os.X_OK) or '.so' in p.name)]
+          env=os.environ.copy(); env['LD_LIBRARY_PATH']=f"{tess/'lib'}:{pybase/'lib'}:"+env.get('LD_LIBRARY_PATH','')
+          deps=set(); unresolved=[]
+          for seed in seeds:
+              try: out=subprocess.check_output(['ldd',str(seed)],stderr=subprocess.STDOUT,text=True,env=env)
+              except Exception: continue
+              if 'not found' in out: unresolved.append((str(seed),out))
+              for line in out.splitlines():
+                  for m in re.finditer(r'(/[^\s()]+)',line):
+                      p=Path(m.group(1))
+                      if p.exists() and not str(p).startswith(str(ws)): deps.add(p)
+          if unresolved: raise SystemExit(repr(unresolved))
+          for p in sorted(deps,key=str):
+              real=Path(os.path.realpath(p))
+              for src in (p,real):
+                  dst=root/src.relative_to('/'); dst.parent.mkdir(parents=True,exist_ok=True)
+                  if src.is_symlink():
+                      if dst.exists() or dst.is_symlink(): dst.unlink()
+                      os.symlink(os.readlink(src),dst)
+                  elif src.is_file(): shutil.copy2(src,dst)
+          print('resolved_dependency_paths',len(deps))
+          PY
+
+          sudo chroot "$ROOT" "$PYBASE/bin/python3.12" - <<'PY'
+          import json,platform,sys
+          assert sys.version_info[:3]==(3,12,13)
+          assert platform.machine()=='x86_64'
+          assert platform.libc_ver()==('glibc','2.39'), platform.libc_ver()
+          print(json.dumps({'python':platform.python_version(),'machine':platform.machine(),'libc':platform.libc_ver()},sort_keys=True))
+          PY
+          sudo chroot "$ROOT" /usr/bin/env -i \
+            LD_LIBRARY_PATH=/opt/musitu/tesseract-5.5.3/lib:"$PYBASE/lib" \
+            TESSDATA_PREFIX=/opt/musitu/tesseract-5.5.3/share/tessdata \
+            /opt/musitu/tesseract-5.5.3/bin/tesseract --list-langs | tee runtime-evidence/CHROOT_TESSERACT_LANGS.txt
+          grep -Fx eng runtime-evidence/CHROOT_TESSERACT_LANGS.txt
+          grep -Fx osd runtime-evidence/CHROOT_TESSERACT_LANGS.txt
+          echo '6ad0afbf020337487c0d103421e430f5e22ed8eefc0eb7420af002a850d1a1e8  '"$ROOT/opt/musitu/tesseract-5.5.3/bin/tesseract" | sha256sum -c -
+
+      - name: Create deterministic runtime bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,stat
+          root=Path('runtime-rootfs'); rows=[]
+          for p in sorted(root.rglob('*'),key=lambda x:x.relative_to(root).as_posix()):
+              rel=p.relative_to(root).as_posix()
+              if p.is_symlink(): rows.append({'path':rel,'type':'symlink','target':os.readlink(p)})
+              elif p.is_file():
+                  h=hashlib.sha256()
+                  with p.open('rb') as f:
+                      for c in iter(lambda:f.read(1048576),b''): h.update(c)
+                  rows.append({'path':rel,'type':'file','bytes':p.stat().st_size,'mode':oct(stat.S_IMODE(p.stat().st_mode)),'sha256':h.hexdigest()})
+          obj={'schema':'musitu.foundry_forge.exact_target_runtime_bundle.v3','target':{'python':'3.12.13','system':'Linux','machine':'x86_64','glibc':'2.39'},'python_source':'actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97','tesseract_source_artifact':{'artifact_id':10279850017,'run_id':34638537263,'job_id':103392280096,'artifact_sha256':'7c7ef782d0a40b166bd966145bedb04a9e34aa4ad338a19d341ead3b3e07259f','internal_tgz_sha256':'031edc6ae21d545c7a7e9801ed55dad8b3ace89aeb7f4cf9a1e5f51837f02fa2'},'tesseract_binary_sha256':'6ad0afbf020337487c0d103421e430f5e22ed8eefc0eb7420af002a850d1a1e8','files':rows,'file_count':len(rows),'private_product_bytes_included':False}
+          Path('runtime-evidence/RUNTIME_ROOTFS_MANIFEST.json').write_text(json.dumps(obj,indent=2,sort_keys=True)+'\n')
+          PY
+          tar --numeric-owner --sort=name --mtime='UTC 2026-09-12 00:00:00' --owner=0 --group=0 -C runtime-rootfs -czf foundry-forge-exact-target-runtime-ubuntu2404-cpython31213.tgz .
+          sha256sum foundry-forge-exact-target-runtime-ubuntu2404-cpython31213.tgz | tee runtime-evidence/RUNTIME_BUNDLE_SHA256.txt
+          sha256sum runtime-evidence/RUNTIME_ROOTFS_MANIFEST.json | tee runtime-evidence/RUNTIME_MANIFEST_SHA256.txt
+
+      - name: Persist exact target runtime bundle
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: foundry-forge-exact-target-runtime-ubuntu2404-cpython31213-v3
+          path: |
+            foundry-forge-exact-target-runtime-ubuntu2404-cpython31213.tgz
+            runtime-evidence/
+          if-no-files-found: error
+          compression-level: 0
