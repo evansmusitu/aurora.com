@@ -1,9 +1,9 @@
-name: Foundry FORGE Flutter toolchain smoke
+name: Foundry FORGE video review toolchain smoke
 
 on:
   push:
     branches:
-      - foundry-forge-flutter-toolchain-20260912
+      - foundry-forge-video-review-toolchain-20260912
   workflow_dispatch:
 
 permissions:
