@@ -9,10 +9,13 @@ packages and generic platform compilation.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+FLUTTER = "flutter.bat" if os.name == "nt" else "flutter"
 
 PUBSPEC = r'''name: universal_toolchain_smoke
 description: Public generic cross-platform Flutter dependency smoke.
@@ -160,7 +163,7 @@ def main() -> None:
         root = Path(tmp)
         platform = 'android' if args.target == 'android' else args.target
         run(
-            'flutter',
+            FLUTTER,
             'create',
             '--org',
             'dev.musitu.publicsmoke',
@@ -179,17 +182,17 @@ def main() -> None:
         shutil.rmtree(root / 'test', ignore_errors=True)
         write(root / 'test' / 'dependency_smoke_test.dart', TEST)
 
-        run('flutter', 'pub', 'get', cwd=root)
-        run('flutter', 'analyze', '--no-fatal-infos', cwd=root)
-        run('flutter', 'test', cwd=root)
+        run(FLUTTER, 'pub', 'get', cwd=root)
+        run(FLUTTER, 'analyze', '--no-fatal-infos', cwd=root)
+        run(FLUTTER, 'test', cwd=root)
 
         commands = {
-            'web': ('flutter', 'build', 'web'),
-            'android': ('flutter', 'build', 'apk', '--debug'),
-            'linux': ('flutter', 'build', 'linux', '--debug'),
-            'windows': ('flutter', 'build', 'windows', '--debug'),
-            'macos': ('flutter', 'build', 'macos', '--debug'),
-            'ios': ('flutter', 'build', 'ios', '--simulator', '--debug'),
+            'web': (FLUTTER, 'build', 'web'),
+            'android': (FLUTTER, 'build', 'apk', '--debug'),
+            'linux': (FLUTTER, 'build', 'linux', '--debug'),
+            'windows': (FLUTTER, 'build', 'windows', '--debug'),
+            'macos': (FLUTTER, 'build', 'macos', '--debug'),
+            'ios': (FLUTTER, 'build', 'ios', '--simulator', '--debug'),
         }
         run(*commands[args.target], cwd=root)
         print(f'PUBLIC_TOOLCHAIN_SMOKE_PASS target={args.target}', flush=True)
