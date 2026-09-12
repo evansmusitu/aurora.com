@@ -63,15 +63,29 @@ Future<void> publicDependencyProbe() async {
   final cipher = AesGcm.with256bits();
   final key = await cipher.newSecretKey();
   final box = await cipher.encrypt(utf8.encode('smoke'), secretKey: key);
-  await cipher.decrypt(box, secretKey: key);
-  const FlutterSecureStorage();
+  final clear = await cipher.decrypt(box, secretKey: key);
+  if (clear.isEmpty) throw StateError('aes-gcm probe failed');
+
+  const secureStorage = FlutterSecureStorage();
+  if (secureStorage.hashCode == -1) throw StateError('unreachable');
+
   final client = http.Client();
   client.close();
-  Connectivity();
-  const XTypeGroup(label: 'media', extensions: ['jpg']);
-  camera.availableCameras;
-  getApplicationSupportDirectory;
-  databaseFactoryMarker();
+
+  final connectivity = Connectivity();
+  if (connectivity.hashCode == -1) throw StateError('unreachable');
+
+  const mediaType = XTypeGroup(label: 'media', extensions: ['jpg']);
+  if (mediaType.label.isEmpty) throw StateError('file selector probe failed');
+
+  final cameraFunction = camera.availableCameras;
+  final supportDirectoryFunction = getApplicationSupportDirectory;
+  if (cameraFunction.hashCode == -1 || supportDirectoryFunction.hashCode == -1) {
+    throw StateError('unreachable');
+  }
+
+  final marker = databaseFactoryMarker();
+  if (marker.hashCode == -1) throw StateError('unreachable');
 }
 
 Future<void> main() async {
@@ -124,40 +138,50 @@ def write(path: Path, text: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--target', required=True, choices=['web', 'android', 'linux', 'windows', 'macos', 'ios'])
+    parser.add_argument(
+        '--target',
+        required=True,
+        choices=['web', 'android', 'linux', 'windows', 'macos', 'ios'],
+    )
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix='forge-flutter-smoke-') as tmp:
-      root = Path(tmp)
-      platform = 'android' if args.target == 'android' else args.target
-      run(
-          'flutter', 'create', '--org', 'dev.musitu.publicsmoke',
-          '--project-name', 'universal_toolchain_smoke',
-          f'--platforms={platform}', '.', cwd=root,
-      )
-      write(root / 'pubspec.yaml', PUBSPEC)
-      write(root / 'lib' / 'main.dart', MAIN)
-      write(root / 'lib' / 'db.dart', DB)
-      write(root / 'lib' / 'db_io.dart', DB_IO)
-      write(root / 'lib' / 'db_web.dart', DB_WEB)
-      write(root / 'lib' / 'db_stub.dart', DB_STUB)
-      shutil.rmtree(root / 'test', ignore_errors=True)
-      write(root / 'test' / 'dependency_smoke_test.dart', TEST)
+        root = Path(tmp)
+        platform = 'android' if args.target == 'android' else args.target
+        run(
+            'flutter',
+            'create',
+            '--org',
+            'dev.musitu.publicsmoke',
+            '--project-name',
+            'universal_toolchain_smoke',
+            f'--platforms={platform}',
+            '.',
+            cwd=root,
+        )
+        write(root / 'pubspec.yaml', PUBSPEC)
+        write(root / 'lib' / 'main.dart', MAIN)
+        write(root / 'lib' / 'db.dart', DB)
+        write(root / 'lib' / 'db_io.dart', DB_IO)
+        write(root / 'lib' / 'db_web.dart', DB_WEB)
+        write(root / 'lib' / 'db_stub.dart', DB_STUB)
+        shutil.rmtree(root / 'test', ignore_errors=True)
+        write(root / 'test' / 'dependency_smoke_test.dart', TEST)
 
-      run('flutter', 'pub', 'get', cwd=root)
-      run('flutter', 'analyze', '--no-fatal-infos', cwd=root)
-      run('flutter', 'test', cwd=root)
+        run('flutter', 'pub', 'get', cwd=root)
+        run('flutter', 'analyze', '--no-fatal-infos', cwd=root)
+        run('flutter', 'test', cwd=root)
 
-      commands = {
-          'web': ('flutter', 'build', 'web'),
-          'android': ('flutter', 'build', 'apk', '--debug'),
-          'linux': ('flutter', 'build', 'linux', '--debug'),
-          'windows': ('flutter', 'build', 'windows', '--debug'),
-          'macos': ('flutter', 'build', 'macos', '--debug'),
-          'ios': ('flutter', 'build', 'ios', '--simulator', '--debug'),
-      }
-      run(*commands[args.target], cwd=root)
-      print(f'PUBLIC_TOOLCHAIN_SMOKE_PASS target={args.target}', flush=True)
+        commands = {
+            'web': ('flutter', 'build', 'web'),
+            'android': ('flutter', 'build', 'apk', '--debug'),
+            'linux': ('flutter', 'build', 'linux', '--debug'),
+            'windows': ('flutter', 'build', 'windows', '--debug'),
+            'macos': ('flutter', 'build', 'macos', '--debug'),
+            'ios': ('flutter', 'build', 'ios', '--simulator', '--debug'),
+        }
+        run(*commands[args.target], cwd=root)
+        print(f'PUBLIC_TOOLCHAIN_SMOKE_PASS target={args.target}', flush=True)
 
 
 if __name__ == '__main__':
