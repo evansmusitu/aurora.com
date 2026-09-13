@@ -1,0 +1,145 @@
+name: FOUNDRY FORGE FFmpeg glibc 2.39 closure
+
+on:
+  push:
+    branches:
+      - foundry-forge-video-review-toolchain-20260912
+    paths:
+      - '.github/workflows/foundry-forge-ffmpeg-glibc239-closure.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-closure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Install Ubuntu 24.04 FFmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ldd --version | head -1
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Build hash-pinned runtime closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/qualification/ffmpeg-glibc239"
+          mkdir -p "$ROOT/bin" "$ROOT/lib"
+          cp -L /usr/bin/ffmpeg "$ROOT/bin/ffmpeg.real"
+          cp -L /usr/bin/ffprobe "$ROOT/bin/ffprobe.real"
+          python3 - <<'PY'
+          import pathlib,re,subprocess,shutil
+          root=pathlib.Path('qualification/ffmpeg-glibc239')
+          libs=set()
+          for exe in ('/usr/bin/ffmpeg','/usr/bin/ffprobe'):
+              out=subprocess.check_output(['ldd',exe],text=True)
+              for line in out.splitlines():
+                  m=re.search(r'=>\s+(/[^ ]+)\s+\(',line)
+                  if m: libs.add(m.group(1))
+                  else:
+                      m=re.match(r'\s*(/[^ ]+)\s+\(',line)
+                      if m: libs.add(m.group(1))
+          # Always bind the exact Ubuntu 24.04 loader used by the closure.
+          for loader in ('/lib64/ld-linux-x86-64.so.2','/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2'):
+              p=pathlib.Path(loader)
+              if p.exists(): libs.add(str(p))
+          for src in sorted(libs):
+              p=pathlib.Path(src)
+              dst=root/'lib'/p.name
+              if dst.exists():
+                  if dst.read_bytes()!=p.read_bytes(): raise SystemExit(f'basename collision: {p.name}')
+              else: shutil.copy2(p,dst,follow_symlinks=True)
+          print('closure_lib_count',len(list((root/'lib').iterdir())))
+          PY
+          LOADER="$(find "$ROOT/lib" -maxdepth 1 -name 'ld-linux-x86-64.so.2' -print -quit)"
+          test -n "$LOADER"
+          cat > "$ROOT/ffmpeg" <<'SH'
+          #!/bin/sh
+          set -eu
+          D=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+          exec "$D/lib/ld-linux-x86-64.so.2" --library-path "$D/lib" "$D/bin/ffmpeg.real" "$@"
+          SH
+          cat > "$ROOT/ffprobe" <<'SH'
+          #!/bin/sh
+          set -eu
+          D=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+          exec "$D/lib/ld-linux-x86-64.so.2" --library-path "$D/lib" "$D/bin/ffprobe.real" "$@"
+          SH
+          chmod 0755 "$ROOT/ffmpeg" "$ROOT/ffprobe" "$ROOT/bin/ffmpeg.real" "$ROOT/bin/ffprobe.real"
+          "$ROOT/ffmpeg" -version | head -1
+          "$ROOT/ffprobe" -version | head -1
+
+      - name: Exercise closure with deterministic video and PNG extraction
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/qualification/ffmpeg-glibc239"
+          mkdir -p /tmp/ffmpeg-closure-proof/frames
+          "$ROOT/ffmpeg" -nostdin -hide_banner -loglevel error -f lavfi -i testsrc=size=160x120:rate=2 -t 3 -pix_fmt yuv420p /tmp/ffmpeg-closure-proof/sample.mp4
+          "$ROOT/ffprobe" -v error -select_streams v:0 -show_entries stream=width,height,codec_name:format=duration -of json /tmp/ffmpeg-closure-proof/sample.mp4 > /tmp/ffmpeg-closure-proof/probe.json
+          "$ROOT/ffmpeg" -nostdin -hide_banner -loglevel error -i /tmp/ffmpeg-closure-proof/sample.mp4 -map_metadata -1 -an -sn -dn -vf 'select=eq(n\,0)+eq(n\,3),format=rgb24' -fps_mode vfr -c:v png -compression_level 9 /tmp/ffmpeg-closure-proof/frames/frame-%03d.png
+          test "$(find /tmp/ffmpeg-closure-proof/frames -type f -name 'frame-*.png' | wc -l)" -eq 2
+          python3 - <<'PY'
+          import json
+          x=json.load(open('/tmp/ffmpeg-closure-proof/probe.json'))
+          assert x['streams'][0]['width']==160 and x['streams'][0]['height']==120
+          assert float(x['format']['duration'])>0
+          PY
+
+      - name: Seal closure manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/qualification/ffmpeg-glibc239"
+          python3 - <<'PY'
+          import hashlib,json,pathlib,platform,subprocess
+          root=pathlib.Path('qualification/ffmpeg-glibc239')
+          def sha(p):
+              h=hashlib.sha256();
+              with p.open('rb') as f:
+                  for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
+              return h.hexdigest()
+          files=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file()):
+              files.append({'path':p.relative_to(root).as_posix(),'size':p.stat().st_size,'sha256':sha(p)})
+          ffv=subprocess.check_output([str(root/'ffmpeg'),'-version'],text=True).splitlines()[0]
+          fpv=subprocess.check_output([str(root/'ffprobe'),'-version'],text=True).splitlines()[0]
+          libc=subprocess.check_output(['ldd','--version'],text=True).splitlines()[0]
+          m={
+            'schema':'musitu.foundry_forge.ffmpeg_glibc239_runtime_closure.v1',
+            'runner':'ubuntu-24.04',
+            'machine':platform.machine(),
+            'libc':libc,
+            'ffmpeg_version':ffv,
+            'ffprobe_version':fpv,
+            'wrapper_ffmpeg_sha256':sha(root/'ffmpeg'),
+            'wrapper_ffprobe_sha256':sha(root/'ffprobe'),
+            'files':files,
+            'synthetic_video_probe':'PASS',
+            'synthetic_png_extraction':'PASS',
+            'private_product_bytes_included':False,
+            'production_authorized':False,
+          }
+          (root/'FFMPEG_CLOSURE_MANIFEST.json').write_text(json.dumps(m,indent=2,sort_keys=True)+'\n')
+          PY
+          sha256sum "$ROOT"/ffmpeg "$ROOT"/ffprobe "$ROOT"/FFMPEG_CLOSURE_MANIFEST.json > "$ROOT/SHA256SUMS.txt"
+          tar --zstd -cf qualification/foundry-forge-ffmpeg-glibc239-closure.tar.zst -C qualification ffmpeg-glibc239
+          sha256sum qualification/foundry-forge-ffmpeg-glibc239-closure.tar.zst > qualification/foundry-forge-ffmpeg-glibc239-closure.tar.zst.sha256
+          cat qualification/foundry-forge-ffmpeg-glibc239-closure.tar.zst.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foundry-forge-ffmpeg-glibc239-closure-v1
+          path: |
+            qualification/foundry-forge-ffmpeg-glibc239-closure.tar.zst
+            qualification/foundry-forge-ffmpeg-glibc239-closure.tar.zst.sha256
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
