@@ -1,0 +1,29 @@
+name: MUSITU FOUNDRY FORGE Modal Authority Probe
+
+on:
+  push:
+    branches:
+      - foundry-forge-modal-authority-probe-20260913
+    paths:
+      - '.github/workflows/foundry-forge-modal-authority-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authority-presence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Report secret presence only
+        shell: bash
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          CLOUDFLARE_GLOBAL_API_KEY: ${{ secrets.CLOUDFLARE_GLOBAL_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$MODAL_TOKEN_ID" ]; then echo 'modal_token_id_present=true'; else echo 'modal_token_id_present=false'; fi
+          if [ -n "$MODAL_TOKEN_SECRET" ]; then echo 'modal_token_secret_present=true'; else echo 'modal_token_secret_present=false'; fi
+          if [ -n "$CLOUDFLARE_GLOBAL_API_KEY" ]; then echo 'cloudflare_global_api_key_present=true'; else echo 'cloudflare_global_api_key_present=false'; fi
