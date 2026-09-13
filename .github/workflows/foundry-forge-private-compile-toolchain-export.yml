@@ -1,0 +1,79 @@
+name: Foundry FORGE private compile toolchain export
+
+on:
+  push:
+    branches:
+      - foundry-forge-private-compile-toolchain-20260913
+    paths:
+      - 'qualification/foundry_forge_private_client_dependency_pubspec.yaml'
+      - '.github/workflows/foundry-forge-private-compile-toolchain-export.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-linux-toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+      - name: Resolve exact source-free private-client dependency set
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf qualification/private-client-smoke qualification/export
+          mkdir -p qualification/private-client-smoke qualification/export
+          cd qualification/private-client-smoke
+          flutter create --org dev.musitu.publicsmoke --project-name foundry_forge_private_client_dependency_smoke --platforms=web .
+          cp ../foundry_forge_private_client_dependency_pubspec.yaml pubspec.yaml
+          flutter pub get
+          flutter pub deps --style=compact > ../export/PUB_DEPS.txt
+          cp pubspec.lock ../export/PUBSPEC_LOCK.yaml
+          flutter --version --machine > ../export/FLUTTER_VERSION.json
+          dart --version 2> ../export/DART_VERSION.txt
+      - name: Package exact Linux Flutter SDK and pub cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")"
+          PUB_CACHE="${PUB_CACHE:-$HOME/.pub-cache}"
+          test -x "$SDK_ROOT/bin/flutter"
+          test -d "$PUB_CACHE"
+          tar --zstd -cf qualification/export/flutter-sdk-linux-3.47.2.tar.zst -C "$(dirname "$SDK_ROOT")" "$(basename "$SDK_ROOT")"
+          tar --zstd -cf qualification/export/foundry-forge-pub-cache.tar.zst -C "$(dirname "$PUB_CACHE")" "$(basename "$PUB_CACHE")"
+          sha256sum \
+            qualification/export/flutter-sdk-linux-3.47.2.tar.zst \
+            qualification/export/foundry-forge-pub-cache.tar.zst \
+            qualification/export/PUBSPEC_LOCK.yaml \
+            qualification/export/PUB_DEPS.txt \
+            qualification/export/FLUTTER_VERSION.json \
+            qualification/export/DART_VERSION.txt \
+            > qualification/export/SHA256SUMS.txt
+          cat qualification/export/SHA256SUMS.txt
+      - name: Upload exact Flutter SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundry-forge-flutter-sdk-linux-3.47.2
+          path: |
+            qualification/export/flutter-sdk-linux-3.47.2.tar.zst
+            qualification/export/FLUTTER_VERSION.json
+            qualification/export/DART_VERSION.txt
+          compression-level: 0
+          retention-days: 30
+      - name: Upload exact private-client dependency cache
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundry-forge-private-client-dependency-cache-v1
+          path: |
+            qualification/export/foundry-forge-pub-cache.tar.zst
+            qualification/export/PUBSPEC_LOCK.yaml
+            qualification/export/PUB_DEPS.txt
+            qualification/export/SHA256SUMS.txt
+          compression-level: 0
+          retention-days: 30
