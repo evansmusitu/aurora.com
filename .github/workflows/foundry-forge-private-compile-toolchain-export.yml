@@ -37,7 +37,7 @@ jobs:
           cp pubspec.lock ../export/PUBSPEC_LOCK.yaml
           flutter --version --machine > ../export/FLUTTER_VERSION.json
           dart --version 2> ../export/DART_VERSION.txt
-      - name: Package exact Linux Flutter SDK and pub cache
+      - name: Package and split exact Linux Flutter SDK plus pub cache
         shell: bash
         run: |
           set -euo pipefail
@@ -47,8 +47,15 @@ jobs:
           test -d "$PUB_CACHE"
           tar --zstd -cf qualification/export/flutter-sdk-linux-3.47.2.tar.zst -C "$(dirname "$SDK_ROOT")" "$(basename "$SDK_ROOT")"
           tar --zstd -cf qualification/export/foundry-forge-pub-cache.tar.zst -C "$(dirname "$PUB_CACHE")" "$(basename "$PUB_CACHE")"
+          split -b 400m -d -a 2 qualification/export/flutter-sdk-linux-3.47.2.tar.zst qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part
+          test "$(find qualification/export -maxdepth 1 -name 'flutter-sdk-linux-3.47.2.tar.zst.part*' | wc -l)" -eq 5
           sha256sum \
             qualification/export/flutter-sdk-linux-3.47.2.tar.zst \
+            qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part00 \
+            qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part01 \
+            qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part02 \
+            qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part03 \
+            qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part04 \
             qualification/export/foundry-forge-pub-cache.tar.zst \
             qualification/export/PUBSPEC_LOCK.yaml \
             qualification/export/PUB_DEPS.txt \
@@ -56,20 +63,55 @@ jobs:
             qualification/export/DART_VERSION.txt \
             > qualification/export/SHA256SUMS.txt
           cat qualification/export/SHA256SUMS.txt
-      - name: Upload exact Flutter SDK
+      - name: Upload SDK metadata
         uses: actions/upload-artifact@v4
         with:
-          name: foundry-forge-flutter-sdk-linux-3.47.2
+          name: foundry-forge-flutter-sdk-linux-3.47.2-metadata
           path: |
-            qualification/export/flutter-sdk-linux-3.47.2.tar.zst
             qualification/export/FLUTTER_VERSION.json
             qualification/export/DART_VERSION.txt
+            qualification/export/SHA256SUMS.txt
+          compression-level: 0
+          retention-days: 30
+      - name: Upload SDK part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundry-forge-flutter-sdk-linux-3.47.2-part00
+          path: qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part00
+          compression-level: 0
+          retention-days: 30
+      - name: Upload SDK part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundry-forge-flutter-sdk-linux-3.47.2-part01
+          path: qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part01
+          compression-level: 0
+          retention-days: 30
+      - name: Upload SDK part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundry-forge-flutter-sdk-linux-3.47.2-part02
+          path: qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part02
+          compression-level: 0
+          retention-days: 30
+      - name: Upload SDK part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundry-forge-flutter-sdk-linux-3.47.2-part03
+          path: qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part03
+          compression-level: 0
+          retention-days: 30
+      - name: Upload SDK part 04
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundry-forge-flutter-sdk-linux-3.47.2-part04
+          path: qualification/export/flutter-sdk-linux-3.47.2.tar.zst.part04
           compression-level: 0
           retention-days: 30
       - name: Upload exact private-client dependency cache
         uses: actions/upload-artifact@v4
         with:
-          name: foundry-forge-private-client-dependency-cache-v1
+          name: foundry-forge-private-client-dependency-cache-v2
           path: |
             qualification/export/foundry-forge-pub-cache.tar.zst
             qualification/export/PUBSPEC_LOCK.yaml
