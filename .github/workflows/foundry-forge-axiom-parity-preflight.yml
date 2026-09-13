@@ -1,0 +1,28 @@
+name: Foundry FORGE Axiom-Parity Edge Preflight
+
+on:
+  push:
+    branches:
+      - foundry-forge-axiom-parity-preflight-20260913
+    paths:
+      - 'qualification/forge_axiom_parity/**'
+      - '.github/workflows/foundry-forge-axiom-parity-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  edge-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact private Worker blob identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object qualification/forge_axiom_parity/worker.mjs)" = '918ec9ba828e367022c231f80344abf50a6210a1'
+          node --check qualification/forge_axiom_parity/worker.mjs
+      - name: Execute source-free edge behavior regression
+        run: node qualification/forge_axiom_parity/test_worker.mjs
