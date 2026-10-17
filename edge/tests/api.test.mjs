@@ -49,15 +49,15 @@ function fake(){
     throw Error('unknown update '+sql);
   }
  }}};
- return {STUDIO_DB:DB,STUDIO_ASSETS:{async get(key){return r2.has(key)?{body:r2.get(key),async arrayBuffer(){return r2.get(key).slice().buffer}}:null},async put(key,bytes){r2.set(key,bytes)}},STUDIO_ADMIN_TOKEN:'A'.repeat(48),STUDIO_MODAL_CALLBACK_KEY:'B'.repeat(48),ENABLE_RENDER_DISPATCH:'false',GPU_EXECUTION_APPROVED:'false',ASSETS:{fetch:async()=>new Response('dashboard',{status:200})},projects,jobs,r2,assets,audits};
+ return {STUDIO_DB:DB,STUDIO_ASSETS:{async get(key){return r2.has(key)?{body:r2.get(key),async arrayBuffer(){return r2.get(key).slice().buffer}}:null},async put(key,bytes){r2.set(key,bytes)}},STUDIO_ADMIN_TOKEN:'A'.repeat(48),STUDIO_LOCAL_TEST_ONLY:'true',STUDIO_MODAL_CALLBACK_KEY:'B'.repeat(48),ENABLE_RENDER_DISPATCH:'false',GPU_EXECUTION_APPROVED:'false',ASSETS:{fetch:async()=>new Response('dashboard',{status:200})},projects,jobs,r2,assets,audits};
 }
-function req(path,method='GET',data,key='A'.repeat(48),origin='https://studio.example.test'){
- return new Request('https://studio.example.test'+path,{method,headers:{authorization:'Bearer '+key,origin,...(data?{'content-type':'application/json'}:{})},body:data?JSON.stringify(data):undefined});
+function req(path,method='GET',data,key='A'.repeat(48),origin='http://127.0.0.1'){
+ return new Request('http://127.0.0.1'+path,{method,headers:{authorization:'Bearer '+key,origin,...(data?{'content-type':'application/json'}:{})},body:data?JSON.stringify(data):undefined});
 }
 async function response(env,path,method='GET',data,key){const r=await worker.fetch(req(path,method,data,key),env);return{status:r.status,data:await r.json()};}
 test('unauthenticated API refused',async()=>{const e=fake(),r=await response(e,'/api/status','GET',undefined,'bad');assert.equal(r.status,401);});
-test('dashboard served as static asset without leaking data',async()=>{const r=await worker.fetch(new Request('https://studio.example.test/'),fake());assert.equal(await r.text(),'dashboard');});
-test('strict origin for POST',async()=>{const e=fake();const r=await worker.fetch(new Request('https://studio.example.test/api/projects',{method:'POST',headers:{origin:'https://evil.test',authorization:'Bearer '+e.STUDIO_ADMIN_TOKEN},body:'{}'}),e);assert.equal(r.status,403);});
+test('dashboard served as static asset without leaking data',async()=>{const r=await worker.fetch(new Request('http://127.0.0.1/'),fake());assert.equal(await r.text(),'dashboard');});
+test('strict origin for POST',async()=>{const e=fake();const r=await worker.fetch(new Request('http://127.0.0.1/api/projects',{method:'POST',headers:{origin:'https://evil.test',authorization:'Bearer '+e.STUDIO_ADMIN_TOKEN},body:'{}'}),e);assert.equal(r.status,403);});
 test('status confirms dispatch disabled',async()=>{const r=await response(fake(),'/api/status');assert.equal(r.status,200);assert.equal(r.data.dispatch_enabled,false);});
 test('end-to-end project, job, approval and no-spend dispatch refusal',async()=>{
  const env=fake();
@@ -145,9 +145,9 @@ test('CUDA is separately blocked even when CPU budget gate is open',async()=>{
 test('reject oversized chunked JSON without content-length before D1 mutations',async()=>{
  const env=fake();
  const stream=new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('x'.repeat(66000)));c.close();}});
- const req=new Request('https://studio.example.test/api/projects',{
+ const req=new Request('http://127.0.0.1/api/projects',{
   method:'POST',duplex:'half',body:stream,
-  headers:{authorization:'Bearer '+env.STUDIO_ADMIN_TOKEN,origin:'https://studio.example.test'}
+  headers:{authorization:'Bearer '+env.STUDIO_ADMIN_TOKEN,origin:'http://127.0.0.1'}
  });
  const r=await worker.fetch(req,env);
  assert.equal(r.status,413);assert.equal((await r.json()).error,'PAYLOAD_TOO_LARGE');
