@@ -14,6 +14,8 @@ import traceback
 
 import bpy
 from mathutils import Vector
+# Blender --python does not consistently add script directory to sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from job_schema import load_job
 
 PALETTE = {
