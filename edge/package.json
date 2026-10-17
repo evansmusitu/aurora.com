@@ -1,0 +1,5 @@
+{
+ "name":"musitu-studio-cloudflare-edge","version":"0.2.0","private":true,"type":"module",
+ "scripts":{"test":"node --test tests/*.test.mjs","check":"node --check src/index.mjs && node --check src/validation.mjs"},
+ "devDependencies":{"wrangler":"^4.36.0"}
+}

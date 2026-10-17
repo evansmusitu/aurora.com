@@ -1,0 +1,83 @@
+name: MUSITU Studio v0.2 Cloudflare Modal Integration CI
+on:
+  push:
+    branches:
+      - experiments/studio-cloudflare-modal-v02-20261017
+    paths:
+      - edge/**
+      - modal/**
+      - studio/execute_job.py
+      - .github/workflows/studio-v02-cloudflare-modal-ci.yml
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: studio-v02-safety-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify-software:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Cloudflare command-validation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd edge
+          node --version
+          node --test tests/*.test.mjs
+          node --check src/index.mjs
+          node --check src/validation.mjs
+          node --check public/studio.js
+      - name: Python compilation and legacy v0.1 tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q studio modal
+          python -m unittest discover -v -s tests
+      - name: Verify no deployment or cost activation requested
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          w=json.loads(pathlib.Path('edge/wrangler.jsonc').read_text())
+          assert w['vars']['ENABLE_RENDER_DISPATCH']=='false'
+          assert w['vars']['GPU_EXECUTION_APPROVED']=='false'
+          assert w['workers_dev']==False
+          assert 'REPLACE_ONLY' in w['d1_databases'][0]['database_id']
+          print('SPENDING_AND_DEPLOYMENT_GATES_CLOSED')
+          PY
+      - name: Fetch official Blender pinned image for software QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Downloading official Blender for temporary GitHub development test'
+          f='blender-4.5.14-linux-x64.tar.xz'
+          curl --fail --location --retry 2 --max-time 150 -o "$f" "https://download.blender.org/release/Blender4.5/$f"
+          echo '9ba871ff2ecd36526b77432745980b7e6664ecd0c7ca11c48849073dcfe06da3  blender-4.5.14-linux-x64.tar.xz' | sha256sum -c -
+          tar -xJf "$f"
+      - name: Render real CPU scene and independently verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof-v02
+          STUDIO_RENDER_DEVICE=CPU ./blender-4.5.14-linux-x64/blender -b --factory-startup --threads 2 \
+            --python studio/execute_job.py -- \
+            --job examples/approved_demo.json --outdir "$PWD/proof-v02" \
+            2>&1 | tee proof-v02/blender_stdout.log
+          python studio/verify_job.py examples/approved_demo.json proof-v02
+          python - <<'PY'
+          import json
+          d=json.load(open('proof-v02/evidence.json'))
+          assert d['result']=='PASS' and d['renderer']=='CYCLES_CPU' and d['gpu_verified'] is False
+          print('ACTUAL_BLENDER_CPU_PASS')
+          PY
+          sha256sum proof-v02/scene.blend proof-v02/scene.glb proof-v02/preview.png > proof-v02/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: musitu-studio-v02-integration-dev-cpu-proof
+          path: proof-v02/
+          retention-days: 7
+          if-no-files-found: warn

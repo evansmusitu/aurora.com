@@ -5,6 +5,7 @@ third-party assets, plug-ins, external commands or provider integrations.
 This is an integration-test proof, NOT a public or production render service.
 """
 import hashlib
+import os
 import json
 import math
 from pathlib import Path
@@ -97,6 +98,17 @@ def setup_scene(job):
         lamp.data.size = 5
     scene.render.engine = 'CYCLES'
     scene.cycles.device = 'CPU'
+    if os.environ.get('STUDIO_RENDER_DEVICE', 'CPU') == 'GPU':
+        prefs = bpy.context.preferences.addons['cycles'].preferences
+        prefs.compute_device_type = 'CUDA'
+        prefs.get_devices()
+        gpu_devices = [d for d in prefs.devices if d.type == 'CUDA']
+        if not gpu_devices:
+            raise RuntimeError('CUDA GPU requested but no Blender Cycles CUDA device detected')
+        for d in prefs.devices:
+            d.use = d.type == 'CUDA'
+        scene.cycles.device = 'GPU'
+        scene['musitu_gpu_device_names'] = ', '.join(d.name for d in gpu_devices)[:250]
     scene.cycles.samples = 8
     scene.render.resolution_x = 320
     scene.render.resolution_y = 200
@@ -121,6 +133,10 @@ def main():
                 'gpu_verified': False, 'submitted_at_unix': int(time.time())}
     try:
         scene = setup_scene(job)
+        cuda_requested = os.environ.get('STUDIO_RENDER_DEVICE', 'CPU') == 'GPU'
+        evidence['renderer'] = 'CYCLES_CUDA' if cuda_requested else 'CYCLES_CPU'
+        evidence['gpu_verified'] = False
+        evidence['gpu_device_names'] = str(scene.get('musitu_gpu_device_names', ''))[:250]
         blend = out / 'scene.blend'
         glb = out / 'scene.glb'
         png = out / 'preview.png'
@@ -133,7 +149,7 @@ def main():
         for p in (blend, glb, png):
             if not p.is_file() or p.stat().st_size <= 1024:
                 raise RuntimeError('Missing/empty expected artifact ' + p.name)
-        evidence.update(result='PASS', meshes=len([o for o in bpy.data.objects if o.type == 'MESH']),
+        evidence.update(result='PASS', gpu_verified=bool(cuda_requested), meshes=len([o for o in bpy.data.objects if o.type == 'MESH']),
                         animated_tracks=len(job.get('animations', [])),
                         files={p.name: {'bytes': p.stat().st_size, 'sha256': sha256(p)}
                                for p in (blend, glb, png)})
