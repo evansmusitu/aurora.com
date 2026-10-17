@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import worker from '../src/index.mjs';
 const VALID={schema:'musitu.blender.job.v1',job_id:'Scene01',objects:[{name:'Cube',type:'cube',location:[0,0,0],dimensions:[1,1,1],material:'ivory'}]};
 function fake(){
- const projects=new Map(), jobs=new Map(), submissions=new Map(), assets=new Map(), audits=[];
+ const projects=new Map(), jobs=new Map(), submissions=new Map(), assets=new Map(), r2=new Map(), audits=[];
  const DB={prepare(sql){let args=[];
  return {bind(...a){args=a;return this;},
   async first(){
@@ -26,10 +26,30 @@ function fake(){
       const j=jobs.get(args[1]);if(j?.state!=='PENDING_APPROVAL')return{meta:{changes:0}};
       j.state='APPROVED';j.approved_at=args[0];return{meta:{changes:1}};
     }
+    if(sql.startsWith("UPDATE jobs SET state='DISPATCHING'")){
+      const j=jobs.get(args[0]);if(j?.state!=='APPROVED')return{meta:{changes:0}};
+      j.state='DISPATCHING';return{meta:{changes:1}};
+    }
+    if(sql.startsWith("UPDATE jobs SET state='RUNNING'")){
+      const j=jobs.get(args[0]);if(j?.state!=='DISPATCHING')return{meta:{changes:0}};
+      j.state='RUNNING';return{meta:{changes:1}};
+    }
+    if(sql.startsWith("UPDATE jobs SET state='FAILED'")){
+      const j=jobs.get(args[2]);if(!['DISPATCHING','RUNNING'].includes(j?.state))return{meta:{changes:0}};
+      j.state='FAILED';j.error=args[0];j.finished_at=args[1];return{meta:{changes:1}};
+    }
+    if(sql.startsWith("UPDATE jobs SET state='COMPLETED'")){
+      const j=jobs.get(args[1]);if(!['DISPATCHING','RUNNING'].includes(j?.state))return{meta:{changes:0}};
+      j.state='COMPLETED';j.finished_at=args[0];return{meta:{changes:1}};
+    }
+    if(sql.startsWith('INSERT INTO assets')){
+      assets.set(args[0]+':'+args[1],{job_id:args[0],filename:args[1],object_key:args[2],sha256:args[3],bytes:args[4]});
+      return{meta:{changes:1}};
+    }
     throw Error('unknown update '+sql);
   }
  }}};
- return {STUDIO_DB:DB,STUDIO_ASSETS:{async get(){return null},async put(){}},STUDIO_ADMIN_TOKEN:'A'.repeat(48),STUDIO_MODAL_CALLBACK_KEY:'B'.repeat(48),ENABLE_RENDER_DISPATCH:'false',GPU_EXECUTION_APPROVED:'false',ASSETS:{fetch:async()=>new Response('dashboard',{status:200})},projects,jobs,audits};
+ return {STUDIO_DB:DB,STUDIO_ASSETS:{async get(key){return r2.has(key)?{body:r2.get(key)}:null},async put(key,bytes){r2.set(key,bytes)}},STUDIO_ADMIN_TOKEN:'A'.repeat(48),STUDIO_MODAL_CALLBACK_KEY:'B'.repeat(48),ENABLE_RENDER_DISPATCH:'false',GPU_EXECUTION_APPROVED:'false',ASSETS:{fetch:async()=>new Response('dashboard',{status:200})},projects,jobs,r2,audits};
 }
 function req(path,method='GET',data,key='A'.repeat(48),origin='https://studio.example.test'){
  return new Request('https://studio.example.test'+path,{method,headers:{authorization:'Bearer '+key,origin,...(data?{'content-type':'application/json'}:{})},body:data?JSON.stringify(data):undefined});
@@ -81,4 +101,43 @@ test('callback mismatched input is never accepted',async()=>{
  e.jobs.get(job.data.job_id).state='RUNNING';
  const bad=await response(e,'/internal/callback','POST',{job_id:job.data.job_id,state:'COMPLETED',input_sha256:'0'.repeat(64),files:[]},'B'.repeat(48));
  assert.equal(bad.status,409);assert.equal(e.jobs.get(job.data.job_id).state,'RUNNING');
+});
+
+test('Fast callback does not regress terminal job state after Modal acknowledgment',async()=>{
+ const e=fake();e.ENABLE_RENDER_DISPATCH='true';e.BUDGET_GUARD_APPROVED='true';e.STUDIO_MODAL_CONTROL_KEY='C'.repeat(48);
+ e.STUDIO_MODAL_URL='https://studio-test.modal.run/jobs';
+ const p=await response(e,'/api/projects','POST',{title:'Race Test'});
+ const j=await response(e,'/api/jobs','POST',{project_id:p.data.project_id,device:'CPU',scene:VALID,submission_key:'race_key_1234567890'});
+ await response(e,'/api/jobs/'+j.data.job_id+'/approve','POST',{});
+ const previous=globalThis.fetch;
+ globalThis.fetch=async(_url,opts)=>{
+   assert.equal(JSON.parse(opts.body).scene_json,JSON.stringify(VALID));
+   e.jobs.get(j.data.job_id).state='COMPLETED';
+   return new Response('accepted',{status:200});
+ };
+ try{
+  const r=await response(e,'/api/jobs/'+j.data.job_id+'/dispatch','POST',{});
+  assert.equal(r.status,202);assert.equal(r.data.state,'COMPLETED');
+  assert.equal(e.jobs.get(j.data.job_id).state,'COMPLETED');
+ }finally{globalThis.fetch=previous;}
+});
+test('Provider rejection never creates a phantom running job',async()=>{
+ const e=fake();e.ENABLE_RENDER_DISPATCH='true';e.BUDGET_GUARD_APPROVED='true';e.STUDIO_MODAL_CONTROL_KEY='C'.repeat(48);
+ e.STUDIO_MODAL_URL='https://studio-test.modal.run/jobs';
+ const p=await response(e,'/api/projects','POST',{title:'Failure Test'});
+ const j=await response(e,'/api/jobs','POST',{project_id:p.data.project_id,device:'CPU',scene:VALID,submission_key:'provider_failure_key_1234'});
+ await response(e,'/api/jobs/'+j.data.job_id+'/approve','POST',{});
+ const prev=globalThis.fetch;globalThis.fetch=async()=>new Response('denied',{status:503});
+ try{const r=await response(e,'/api/jobs/'+j.data.job_id+'/dispatch','POST',{});
+   assert.equal(r.status,502);assert.equal(e.jobs.get(j.data.job_id).state,'FAILED');
+ }finally{globalThis.fetch=prev;}
+});
+test('CUDA is separately blocked even when CPU budget gate is open',async()=>{
+ const e=fake();e.ENABLE_RENDER_DISPATCH='true';e.BUDGET_GUARD_APPROVED='true';e.STUDIO_MODAL_CONTROL_KEY='C'.repeat(48);
+ e.STUDIO_MODAL_URL='https://studio-test.modal.run/jobs';
+ const p=await response(e,'/api/projects','POST',{title:'GPU Test'});
+ const j=await response(e,'/api/jobs','POST',{project_id:p.data.project_id,device:'GPU',scene:VALID,submission_key:'gpu_block_key_1234567'});
+ await response(e,'/api/jobs/'+j.data.job_id+'/approve','POST',{});
+ const r=await response(e,'/api/jobs/'+j.data.job_id+'/dispatch','POST',{});
+ assert.equal(r.status,503);assert.equal(r.data.error,'GPU_GATE_CLOSED');
 });
