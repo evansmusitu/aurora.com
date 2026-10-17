@@ -85,6 +85,17 @@ jobs:
           print('ACTUAL_BLENDER_CPU_PASS')
           PY
           sha256sum proof-v02/scene.blend proof-v02/scene.glb proof-v02/preview.png > proof-v02/SHA256SUMS.txt
+      - name: Bundle studio integration source
+        run: |
+          tar --exclude='__pycache__' -czf studio-v02-source.tar.gz edge modal studio examples docs/STUDIO_CLOUDFLARE_MODAL_V02.md
+          sha256sum studio-v02-source.tar.gz > studio-v02-source.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: musitu-studio-v02-source-bundle
+          path: |
+            studio-v02-source.tar.gz
+            studio-v02-source.sha256
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
