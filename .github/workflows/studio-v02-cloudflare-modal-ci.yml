@@ -35,6 +35,17 @@ jobs:
           set -euo pipefail
           python -m compileall -q studio modal
           python -m unittest discover -v -s tests
+      - name: Import real Modal SDK adapter without deploying or invoking compute
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q 'modal>=1.5,<2'
+          python - <<'PY'
+          import runpy
+          m=runpy.run_path('modal/studio_modal.py')
+          assert 'render_cpu' in m and 'render_gpu' in m and 'submit_asgi' in m
+          print('MODAL_ADAPTER_SDK_IMPORT_PASS_NO_DEPLOY')
+          PY
       - name: Verify no deployment or cost activation requested
         shell: bash
         run: |
