@@ -1,0 +1,59 @@
+name: MUSITU Isolated CPU Worker Software Proof
+on:
+  push:
+    branches:
+      - experiments/blender-worker-gate-20261017
+    paths:
+      - 'studio/**'
+      - 'tests/**'
+      - 'examples/**'
+      - '.github/workflows/musitu-studio-approved-worker-proof.yml'
+permissions:
+  contents: read
+concurrency:
+  group: musitu-worker-software-integration-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  cpu-worker-unit-and-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Validate safety policy and tamper-proofing (software tests only)
+        run: python3 -m unittest discover -s tests -v
+      - name: Download release-pinned Blender
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --max-time 180 -o blender-4.5.14-linux-x64.tar.xz https://download.blender.org/release/Blender4.5/blender-4.5.14-linux-x64.tar.xz
+          echo '9ba871ff2ecd36526b77432745980b7e6664ecd0c7ca11c48849073dcfe06da3  blender-4.5.14-linux-x64.tar.xz' | sha256sum -c -
+          tar -xJf blender-4.5.14-linux-x64.tar.xz
+          ./blender-4.5.14-linux-x64/blender --version | head -6
+      - name: One bounded real Blender integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 -p proof
+          sha="$(sha256sum examples/approved_demo.json | cut -d' ' -f1)"
+          python3 studio/enterprise_worker.py --job examples/approved_demo.json --expected-sha256 "$sha" \
+            --output-root proof --blender "$PWD/blender-4.5.14-linux-x64/blender" \
+            --device CPU --timeout-seconds 120 --cpu-threads 2
+          python3 - <<'PY'
+          import json,pathlib
+          from sys import exit
+          p=pathlib.Path('proof/MUSITU_ControlPlane_Proof_02')
+          r=json.loads((p/'worker_receipt.json').read_text())
+          assert r['state']=='VERIFIED',r
+          assert r['gpu_verified'] is False,r
+          assert r['verification']['result']=='PASS',r
+          print('MUSITU_WORKER_REAL_BLENDER_VERIFIED', r['job_id'])
+          PY
+      - name: Archive bounded development test proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musitu-worker-development-integration-evidence
+          path: proof/
+          retention-days: 7
+          if-no-files-found: warn
