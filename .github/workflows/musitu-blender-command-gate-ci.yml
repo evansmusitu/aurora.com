@@ -1,0 +1,74 @@
+name: MUSITU Blender Declarative Command Gate CI
+on:
+  push:
+    branches:
+      - experiments/blender-command-gate-20261017
+    paths:
+      - 'studio/**'
+      - 'examples/approved_demo.json'
+      - 'tests/**'
+      - '.github/workflows/musitu-blender-command-gate-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: musitu-studio-gate-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  command-gate-software-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Checkout isolated branch
+        uses: actions/checkout@v4
+      - name: Record test environment
+        run: |
+          uname -a
+          nproc
+          grep -E 'MemTotal|MemAvailable' /proc/meminfo
+          if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,memory.total --format=csv; else echo 'GPU=NOT_AVAILABLE'; fi
+      - name: Validate declarative job and security guards
+        run: |
+          python -m unittest discover -v -s tests
+          python - <<'PY'
+          import sys
+          sys.path.insert(0,'studio')
+          from job_schema import load_job
+          j=load_job('examples/approved_demo.json')
+          print('VALIDATED_JOB', j['job_id'], len(j['objects']))
+          PY
+      - name: Fetch pinned official Blender from release distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          fn=blender-4.5.14-linux-x64.tar.xz
+          curl --fail --location --retry 3 --max-time 180 -o "$fn" "https://download.blender.org/release/Blender4.5/$fn"
+          echo '9ba871ff2ecd36526b77432745980b7e6664ecd0c7ca11c48849073dcfe06da3  blender-4.5.14-linux-x64.tar.xz' | sha256sum -c -
+          tar -xJf "$fn"
+          ./blender-4.5.14-linux-x64/blender --version | head -6
+      - name: Execute real Blender on one sanitized demo scene
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          ./blender-4.5.14-linux-x64/blender -b --factory-startup --threads 2 \
+            --python studio/execute_job.py -- \
+            --job examples/approved_demo.json --outdir "$PWD/proof" \
+            2>&1 | tee proof/blender_stdout.log
+      - name: Verify exact artifact hashes, geometry and animation metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python studio/verify_job.py examples/approved_demo.json proof
+          sha256sum proof/* > proof/SHA256SUMS.txt
+      - name: Preserve small development test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musitu-command-gate-development-proof
+          path: proof/
+          if-no-files-found: warn
+          retention-days: 7
