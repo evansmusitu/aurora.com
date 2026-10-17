@@ -1,3 +1,4 @@
+import {validateAccess} from './access.mjs';
 import {validateScene,sha256,equalSecret,assetType,validArtifactHeader} from './validation.mjs';
 const DEFAULT_HEADERS={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','x-frame-options':'DENY','referrer-policy':'no-referrer'};
 const json=(obj,status=200)=>new Response(JSON.stringify(obj),{status,headers:DEFAULT_HEADERS});
@@ -172,6 +173,11 @@ async function api(req,env,url){
 }
 export default {async fetch(request,env){
   const url=new URL(request.url);
+  // Modal callbacks use their own strong shared key and remain excluded from
+  // browser Cloudflare Access; all other paths require a signed Access JWT.
+  if(url.pathname!=='/internal/callback'){
+    if(!await validateAccess(request,env))return err('ACCESS_DENIED',403);
+  }
   if(!url.pathname.startsWith('/api/')&&url.pathname!=='/internal/callback'){
     return env.ASSETS?env.ASSETS.fetch(request):err('NO_ASSETS',404);
   }
