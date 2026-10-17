@@ -52,3 +52,29 @@ export function equalSecret(a,b){
 export function assetType(name){
   return ({'scene.blend':'application/octet-stream','scene.glb':'model/gltf-binary','preview.png':'image/png'})[name]||null;
 }
+
+/** Confirm each small Blender deliverable has the expected binary structure.
+ * Intentionally bounded to the v0.6 320x200 preview and GLB v2 export contract.
+ * This is structural verification, NOT a proof of harmless Blender content.
+ */
+export function validArtifactHeader(name, bytes){
+  if(!(bytes instanceof Uint8Array)||bytes.byteLength<32)return false;
+  if(name==='scene.blend'){
+    return new TextDecoder().decode(bytes.subarray(0,7))==='BLENDER';
+  }
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  if(name==='scene.glb'){
+    return new TextDecoder().decode(bytes.subarray(0,4))==='glTF' &&
+      view.getUint32(4,true)===2 && view.getUint32(8,true)===bytes.byteLength &&
+      view.getUint32(12,true)>=2 && view.getUint32(12,true)<=bytes.byteLength-20 &&
+      new TextDecoder().decode(bytes.subarray(16,20))==='JSON';
+  }
+  if(name==='preview.png'){
+    const sig=[137,80,78,71,13,10,26,10];
+    return sig.every((n,i)=>bytes[i]===n) &&
+      view.getUint32(8,false)===13 &&
+      new TextDecoder().decode(bytes.subarray(12,16))==='IHDR' &&
+      view.getUint32(16,false)===320 && view.getUint32(20,false)===200;
+  }
+  return false;
+}
