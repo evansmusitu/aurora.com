@@ -10,10 +10,23 @@ function auth(req,env,type='admin'){
   return equalSecret(supplied.startsWith('Bearer ')?supplied.slice(7):'',key);
 }
 async function bodyJson(req,max=65536){
-  if(Number(req.headers.get('content-length')||0)>max)throw new Error('PAYLOAD_TOO_LARGE');
-  const raw=await req.text();
-  if(new TextEncoder().encode(raw).length>max)throw new Error('PAYLOAD_TOO_LARGE');
-  return JSON.parse(raw);
+  const length=req.headers.get('content-length');
+  if(length!==null&&(!/^\d+$/.test(length)||Number(length)>max))throw new Error('PAYLOAD_TOO_LARGE');
+  if(!req.body)throw new SyntaxError('MISSING_BODY');
+  const reader=req.body.getReader();
+  const chunks=[];let size=0;
+  try{
+    for(;;){
+      const {value,done}=await reader.read();
+      if(done)break;
+      size+=value.byteLength;
+      if(size>max){await reader.cancel();throw new Error('PAYLOAD_TOO_LARGE');}
+      chunks.push(value);
+    }
+  }finally{reader.releaseLock();}
+  const bytes=new Uint8Array(size);let position=0;
+  for(const chunk of chunks){bytes.set(chunk,position);position+=chunk.byteLength;}
+  return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
 }
 function traceJob(row){
   if(!row)return null;
@@ -29,7 +42,7 @@ function checkBindings(env){
 }
 async function callback(req,env){
   if(!auth(req,env,'callback'))return err('UNAUTHORIZED',401);
-  let b;try{b=await bodyJson(req,7500000)}catch{return err('INVALID_CALLBACK');}
+  let b;try{b=await bodyJson(req,7500000)}catch(e){return e.message==='PAYLOAD_TOO_LARGE'?err('PAYLOAD_TOO_LARGE',413):err('INVALID_CALLBACK');}
   if(!b||typeof b.job_id!=='string'||!['COMPLETED','FAILED'].includes(b.state))return err('INVALID_CALLBACK');
   const row=await statement(env.STUDIO_DB,'SELECT * FROM jobs WHERE id=?',b.job_id).first();
   if(!row||!['DISPATCHING','RUNNING'].includes(row.state))return err('JOB_NOT_ACTIVE',409);
@@ -40,7 +53,7 @@ async function callback(req,env){
     await event(env,row.id,'RENDER_FAILED');
     return json({ok:true,state:'FAILED'});
   }
-  if((row.render_device==='GPU')!==Boolean(b.gpu_verified))return err('DEVICE_PROOF_MISMATCH',409);
+  if(typeof b.gpu_verified!=='boolean'||(row.render_device==='GPU')!==b.gpu_verified)return err('DEVICE_PROOF_MISMATCH',409);
   if(!Array.isArray(b.files)||b.files.length!==3)return err('WRONG_ARTIFACT_COUNT',400);
   const expected=new Set(['scene.blend','scene.glb','preview.png']);
   const decoded=[];
@@ -115,7 +128,10 @@ async function api(req,env,url){
     if(!meta)return err('ARTIFACT_NOT_FOUND',404);
     const object=await env.STUDIO_ASSETS.get(meta.object_key);
     if(!object)return err('ASSET_STORAGE_MISSING',503);
-    return new Response(object.body,{headers:{'content-type':assetType(filename),'content-disposition':'attachment; filename="'+filename+'"','cache-control':'no-store','x-content-type-options':'nosniff','x-artifact-sha256':meta.sha256}});
+    const bytes=new Uint8Array(await object.arrayBuffer());
+    if(bytes.length!==meta.bytes||(await sha256(bytes))!==meta.sha256||!validArtifactHeader(filename,bytes))
+      return err('R2_OBJECT_INTEGRITY_FAILURE',409);
+    return new Response(bytes,{headers:{'content-type':assetType(filename),'content-disposition':'attachment; filename="'+filename+'"','cache-control':'no-store','x-content-type-options':'nosniff','x-artifact-sha256':meta.sha256}});
   }
   if(req.method==='POST'&&action==='approve'){
     const r=await statement(env.STUDIO_DB,"UPDATE jobs SET state='APPROVED',approved_at=? WHERE id=? AND state='PENDING_APPROVAL'",now(),id).run();
