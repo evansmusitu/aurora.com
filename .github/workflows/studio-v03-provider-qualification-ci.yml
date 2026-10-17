@@ -102,7 +102,7 @@ jobs:
       - name: Bundle studio integration source
         run: |
           tar --exclude='__pycache__' -czf studio-v03-source.tar.gz edge modal studio examples ops docs/STUDIO_CLOUDFLARE_MODAL_V02.md
-          sha256sum studio-v02-source.tar.gz > studio-v03-source.sha256
+          sha256sum studio-v03-source.tar.gz > studio-v03-source.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: musitu-studio-v03-source-bundle
