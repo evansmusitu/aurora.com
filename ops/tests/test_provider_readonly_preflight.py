@@ -33,6 +33,29 @@ class ProviderPreflight(unittest.TestCase):
         self.assertFalse(x["cloudflare"]["studio_r2_exists"])
         self.assertNotIn("DO_NOT_LOG",json.dumps(x))
         self.assertFalse(x["provider_zero_charge_cap_verified"])
+    def test_scoped_token_preferred_to_legacy_global_key(self):
+        paths=[]
+        def opener(req,timeout):
+            self.assertEqual(req.get_method(),"GET")
+            self.assertEqual(req.get_header("Authorization"),"Bearer scoped-do-not-leak")
+            self.assertIsNone(req.get_header("X-auth-key"))
+            paths.append(req.full_url)
+            if req.full_url.endswith("/accounts/"+"a"*32):
+                return FakeResponse({"success":True,"result":{"id":"a"*32}})
+            if "/d1/" in req.full_url:
+                return FakeResponse({"success":True,"result":[]})
+            if "/r2/" in req.full_url:
+                return FakeResponse({"success":True,"result":{"buckets":[{"name":"musitu-studio-v02-assets"}]}})
+            raise AssertionError("Unexpected endpoint")
+        x=m.inspect({"STUDIO_CF_ACCOUNT_ID":"a"*32,
+                     "CLOUDFLARE_API_TOKEN":"scoped-do-not-leak",
+                     "CLOUDFLARE_EMAIL":"x@e.com",
+                     "CLOUDFLARE_GLOBAL_API_KEY":"legacy-do-not-leak"},opener=opener)
+        self.assertEqual(len(paths),3)
+        self.assertEqual(x["cloudflare"]["status"],"READ_ONLY_OK")
+        self.assertTrue(x["cloudflare"]["studio_r2_exists"])
+        self.assertNotIn("scoped-do-not-leak",json.dumps(x))
+        self.assertNotIn("legacy-do-not-leak",json.dumps(x))
     def test_modal_list_does_not_dispatch(self):
         observed=[]
         def runner(args,**kw):

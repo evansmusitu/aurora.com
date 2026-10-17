@@ -5,10 +5,16 @@ def inspect(env, opener=urllib.request.urlopen, run=subprocess.run, which=shutil
       "render_authorized":False,"deployment_authorized":False,"provider_zero_charge_cap_verified":False,
       "cloudflare":{"status":"NOT_CONFIGURED"},"modal":{"status":"NOT_CONFIGURED"}}
     aid=env.get("STUDIO_CF_ACCOUNT_ID","")
-    if (re.fullmatch("[0-9a-fA-F]{32}",aid) and env.get("CLOUDFLARE_EMAIL")
-        and env.get("CLOUDFLARE_GLOBAL_API_KEY")):
-        headers={"X-Auth-Email":env["CLOUDFLARE_EMAIL"],
-                 "X-Auth-Key":env["CLOUDFLARE_GLOBAL_API_KEY"],"Accept":"application/json"}
+    bearer = (env.get("CLOUDFLARE_API_TOKEN") or env.get("CF_API_TOKEN")
+              or env.get("CLOUDFLARE_TOKEN"))
+    legacy = bool(env.get("CLOUDFLARE_EMAIL") and env.get("CLOUDFLARE_GLOBAL_API_KEY"))
+    if re.fullmatch("[0-9a-fA-F]{32}",aid) and (bearer or legacy):
+        # Scoped token is preferred: legacy global key failed on the verified
+        # MUSITU account, while bearer read-only D1/R2 calls succeeded.
+        headers=({"Authorization":"Bearer "+bearer,"Accept":"application/json"}
+                 if bearer else
+                 {"X-Auth-Email":env["CLOUDFLARE_EMAIL"],
+                  "X-Auth-Key":env["CLOUDFLARE_GLOBAL_API_KEY"],"Accept":"application/json"})
         def get(path):
             req=urllib.request.Request("https://api.cloudflare.com/client/v4"+path,headers=headers,method="GET")
             with opener(req,timeout=25) as resp: payload=json.load(resp)

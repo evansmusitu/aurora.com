@@ -1,0 +1,41 @@
+name: MUSITU Studio v0.4 Live-Provider Token-Safe Source CI
+on:
+  push:
+    branches:
+      - experiments/studio-live-provider-qualification-20261017
+    paths:
+      - 'ops/**'
+      - '.github/workflows/studio-v04-live-provider-test.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python static checks and provider auth unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q ops studio modal
+          python -m unittest discover -v -s ops/tests
+          python -m unittest discover -v -s tests
+          python ops/provider_readonly_preflight.py > /dev/null
+          python - <<'PY'
+          import json
+          report=json.load(open('studio-provider-preflight.json'))
+          assert report['read_only']
+          assert not report['deployment_authorized']
+          assert not report['render_authorized']
+          assert not report['provider_zero_charge_cap_verified']
+          print('STUDIO_V04_PROVIDER_SOURCE_VALIDATED_BILLING_GATES_CLOSED')
+          PY
+      - name: Cloudflare UI and API regression
+        run: |
+          set -euo pipefail
+          cd edge
+          node --test tests/*.test.mjs
+          node --check src/index.mjs
+          node --check src/validation.mjs
+          node --check public/studio.js
