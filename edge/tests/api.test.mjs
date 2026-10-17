@@ -49,7 +49,7 @@ function fake(){
     throw Error('unknown update '+sql);
   }
  }}};
- return {STUDIO_DB:DB,STUDIO_ASSETS:{async get(key){return r2.has(key)?{body:r2.get(key)}:null},async put(key,bytes){r2.set(key,bytes)}},STUDIO_ADMIN_TOKEN:'A'.repeat(48),STUDIO_MODAL_CALLBACK_KEY:'B'.repeat(48),ENABLE_RENDER_DISPATCH:'false',GPU_EXECUTION_APPROVED:'false',ASSETS:{fetch:async()=>new Response('dashboard',{status:200})},projects,jobs,r2,audits};
+ return {STUDIO_DB:DB,STUDIO_ASSETS:{async get(key){return r2.has(key)?{body:r2.get(key),async arrayBuffer(){return r2.get(key).slice().buffer}}:null},async put(key,bytes){r2.set(key,bytes)}},STUDIO_ADMIN_TOKEN:'A'.repeat(48),STUDIO_MODAL_CALLBACK_KEY:'B'.repeat(48),ENABLE_RENDER_DISPATCH:'false',GPU_EXECUTION_APPROVED:'false',ASSETS:{fetch:async()=>new Response('dashboard',{status:200})},projects,jobs,r2,assets,audits};
 }
 function req(path,method='GET',data,key='A'.repeat(48),origin='https://studio.example.test'){
  return new Request('https://studio.example.test'+path,{method,headers:{authorization:'Bearer '+key,origin,...(data?{'content-type':'application/json'}:{})},body:data?JSON.stringify(data):undefined});
@@ -140,4 +140,47 @@ test('CUDA is separately blocked even when CPU budget gate is open',async()=>{
  await response(e,'/api/jobs/'+j.data.job_id+'/approve','POST',{});
  const r=await response(e,'/api/jobs/'+j.data.job_id+'/dispatch','POST',{});
  assert.equal(r.status,503);assert.equal(r.data.error,'GPU_GATE_CLOSED');
+});
+
+test('reject oversized chunked JSON without content-length before D1 mutations',async()=>{
+ const env=fake();
+ const stream=new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('x'.repeat(66000)));c.close();}});
+ const req=new Request('https://studio.example.test/api/projects',{
+  method:'POST',duplex:'half',body:stream,
+  headers:{authorization:'Bearer '+env.STUDIO_ADMIN_TOKEN,origin:'https://studio.example.test'}
+ });
+ const r=await worker.fetch(req,env);
+ assert.equal(r.status,413);assert.equal((await r.json()).error,'PAYLOAD_TOO_LARGE');
+ assert.equal(env.projects.size,0);
+});
+test('GPU status must be a literal boolean, not a truthy string',async()=>{
+ const env=fake(),p=await response(env,'/api/projects','POST',{title:'Proof'});
+ const j=await response(env,'/api/jobs','POST',{project_id:p.data.project_id,scene:VALID,
+   device:'CPU',submission_key:'boolean_guard_key_123456'});
+ const row=env.jobs.get(j.data.job_id);row.state='RUNNING';
+ const bad=await response(env,'/internal/callback','POST',{
+   job_id:row.id,input_sha256:row.payload_sha256,state:'COMPLETED',gpu_verified:'false',files:[]
+ },'B'.repeat(48));
+ assert.equal(bad.status,409);assert.equal(bad.data.error,'DEVICE_PROOF_MISMATCH');
+ assert.equal(row.state,'RUNNING');
+});
+test('download refuses R2 objects changed after recorded SHA-256 receipt',async()=>{
+ const env=fake(),p=await response(env,'/api/projects','POST',{title:'Integrity'});
+ const j=await response(env,'/api/jobs','POST',{project_id:p.data.project_id,scene:VALID,
+   device:'CPU',submission_key:'r2_integrity_key_1234567'});
+ const row=env.jobs.get(j.data.job_id);row.state='COMPLETED';
+ const original=new Uint8Array(64);original.set(new TextEncoder().encode('BLENDER'));
+ const expected=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',original)))
+   .map(b=>b.toString(16).padStart(2,'0')).join('');
+ const key='jobs/'+row.id+'/scene.blend';
+ env.assets.set(row.id+':scene.blend',{job_id:row.id,filename:'scene.blend',object_key:key,
+   sha256:expected,bytes:original.length});
+ const altered=original.slice();altered[60]=4;env.r2.set(key,altered);
+ const mismatch=await response(env,'/api/jobs/'+row.id+'/assets/scene.blend');
+ assert.equal(mismatch.status,409);assert.equal(mismatch.data.error,'R2_OBJECT_INTEGRITY_FAILURE');
+ env.r2.set(key,original);
+ const restored=await worker.fetch(req('/api/jobs/'+row.id+'/assets/scene.blend'),env);
+ assert.equal(restored.status,200);
+ assert.deepEqual(new Uint8Array(await restored.arrayBuffer()),original);
+ assert.equal(restored.headers.get('x-artifact-sha256'),expected);
 });
