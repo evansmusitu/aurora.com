@@ -168,7 +168,7 @@ def create_scene():
     scene.render.resolution_percentage=100
     scene.render.image_settings.file_format='PNG'
     scene.frame_set(1)
-    scene.world.color=(.13,.13,.13)
+    scene.world = bpy.data.worlds.new('MUSITU_Studio_World')\n    scene.world.color=(.13,.13,.13)
     return scene
 
 
