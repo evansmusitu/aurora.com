@@ -92,9 +92,13 @@ async function api(req,env,url){
     try{validateScene(b.scene)}catch{return err('INVALID_SCENE');}
     const project=await statement(env.STUDIO_DB,'SELECT id FROM projects WHERE id=?',b.project_id).first();
     if(!project)return err('PROJECT_NOT_FOUND',404);
+    const input=JSON.stringify(b.scene),digest=await sha256(input);
     const existing=await statement(env.STUDIO_DB,'SELECT * FROM jobs WHERE submission_key=?',b.submission_key).first();
-    if(existing)return json({ok:true,duplicate:true,job:traceJob(existing)});
-    const input=JSON.stringify(b.scene),digest=await sha256(input),id=crypto.randomUUID();
+    if(existing){
+      if(existing.project_id!==b.project_id||existing.render_device!==b.device||existing.payload_sha256!==digest)return err('SUBMISSION_KEY_CONFLICT',409);
+      return json({ok:true,duplicate:true,job:traceJob(existing)});
+    }
+    const id=crypto.randomUUID();
     await statement(env.STUDIO_DB,'INSERT INTO jobs(id,project_id,submission_key,payload_json,payload_sha256,render_device,state,created_at) VALUES(?,?,?,?,?,?,?,?)',id,b.project_id,b.submission_key,input,digest,b.device,'PENDING_APPROVAL',now()).run();
     await event(env,id,'JOB_SUBMITTED',{device:b.device});
     return json({ok:true,job_id:id,state:'PENDING_APPROVAL'},201);
