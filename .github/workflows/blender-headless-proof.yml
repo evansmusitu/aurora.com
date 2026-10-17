@@ -1,0 +1,76 @@
+name: MUSITU Blender Actual Execution Proof
+on:
+  push:
+    branches:
+      - experiments/blender-headless-smoke-20261017
+    paths:
+      - tools/blender_smoke.py
+      - .github/workflows/blender-headless-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  actual-blender-cpu-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Check out isolated test branch
+        uses: actions/checkout@v4
+
+      - name: Record CI compute facts
+        run: |
+          uname -a
+          grep -E 'MemTotal|MemAvailable' /proc/meminfo
+          nproc
+          command -v nvidia-smi || echo 'No NVIDIA GPU visibility; GPU NOT VERIFIED'
+
+      - name: Download and authenticate official Blender 4.5.14
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://download.blender.org/release/Blender4.5'
+          fname='blender-4.5.14-linux-x64.tar.xz'
+          curl --fail --location --retry 3 --connect-timeout 20 --output blender-4.5.14.sha256 "$base/blender-4.5.14.sha256"
+          grep -F "$fname" blender-4.5.14.sha256
+          curl --fail --location --retry 3 --connect-timeout 20 --output "$fname" "$base/$fname"
+          sha256sum --ignore-missing --check blender-4.5.14.sha256
+          tar -xJf "$fname"
+          ./blender-4.5.14-linux-x64/blender --version | head -5
+
+      - name: Create Blender scene and run real Cycles CPU render
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          ./blender-4.5.14-linux-x64/blender --background --factory-startup --threads 2 --python tools/blender_smoke.py -- --outdir "$PWD/proof" 2>&1 | tee proof/blender_output.log
+
+      - name: Verify evidence and Blender file signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, pathlib, hashlib
+          p=pathlib.Path('proof')
+          d=json.loads((p/'execution_evidence.json').read_text())
+          assert d['result']=='PASS', d
+          assert d['device']=='CPU', d
+          assert not d['gpu_verified'], d
+          blend=p/'MUSITU_Blender_Actual_Execution.blend'
+          png=p/'cpu_render.png'
+          assert blend.read_bytes()[:7]==b'BLENDER', 'Not a genuine .blend file'
+          assert png.read_bytes()[:8]==b'\x89PNG\r\n\x1a\n', 'Not a genuine PNG file'
+          for f,field in ((blend,'blend_sha256'),(png,'png_sha256')):
+              assert hashlib.sha256(f.read_bytes()).hexdigest()==d[field],f
+          print('VERIFIED_TRUE_BLENDER_CPU_RENDER',json.dumps(d,sort_keys=True))
+          PY
+          sha256sum proof/* > proof/SHA256SUMS.txt
+
+      - name: Retain bounded CI proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musitu-actual-blender-cpu-execution
+          path: proof/
+          if-no-files-found: warn
+          retention-days: 7
