@@ -28,7 +28,7 @@ function fake(){
     }
     throw Error('unknown update '+sql);
   }
- }};}};
+ }}};
  return {STUDIO_DB:DB,STUDIO_ASSETS:{async get(){return null},async put(){}},STUDIO_ADMIN_TOKEN:'A'.repeat(48),STUDIO_MODAL_CALLBACK_KEY:'B'.repeat(48),ENABLE_RENDER_DISPATCH:'false',GPU_EXECUTION_APPROVED:'false',ASSETS:{fetch:async()=>new Response('dashboard',{status:200})},projects,jobs,audits};
 }
 function req(path,method='GET',data,key='A'.repeat(48),origin='https://studio.example.test'){
