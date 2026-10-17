@@ -41,7 +41,7 @@ jobs:
           }
           conf.d1_databases[0].database_id='00000000-0000-0000-0000-000000000001';
           fs.writeFileSync('wrangler.local.ci.json',JSON.stringify(conf,null,2));
-          fs.writeFileSync('.dev.vars','STUDIO_ADMIN_TOKEN='+'A'.repeat(48)+'\nSTUDIO_MODAL_CALLBACK_KEY='+'B'.repeat(48)+'\n');
+          fs.writeFileSync('.dev.vars','STUDIO_ADMIN_TOKEN='+'A'.repeat(48)+'\nSTUDIO_MODAL_CALLBACK_KEY='+'B'.repeat(48)+'\nSTUDIO_LOCAL_TEST_ONLY=true\n');
           console.log('LOCAL_EMULATOR_NO_CLOUDFLARE_CREDENTIALS');
           JS
           npx wrangler d1 migrations apply musitu-studio-v02 --local --config wrangler.local.ci.json --persist-to .wrangler/state
