@@ -107,8 +107,8 @@ jobs:
         with:
           name: musitu-studio-v03-source-bundle
           path: |
-            studio-v02-source.tar.gz
-            studio-v02-source.sha256
+            studio-v03-source.tar.gz
+            studio-v03-source.sha256
           retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
