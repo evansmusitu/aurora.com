@@ -29,6 +29,12 @@ if(mode==='stage'){
   assert.equal(job.status,201,JSON.stringify(job.data));
   const dup=await request('/api/jobs','POST',{project_id:project.data.project_id,scene,device:'CPU',submission_key:key});
   assert.equal(dup.status,200);assert.equal(dup.data.duplicate,true);
+  const sceneChanged={...scene,objects:scene.objects.map((o,i)=>i===0?{...o,material:o.material==='copper'?'teal':'copper'}:o)};
+  const collision=await request('/api/jobs','POST',{project_id:project.data.project_id,scene:sceneChanged,device:'CPU',submission_key:key});
+  assert.equal(collision.status,409,'Job key reuse with different scene must fail');
+  assert.equal(collision.data.error,'SUBMISSION_KEY_CONFLICT');
+  const deviceCollision=await request('/api/jobs','POST',{project_id:project.data.project_id,scene,device:'GPU',submission_key:key});
+  assert.equal(deviceCollision.status,409,'Job key reuse with different device must fail');
   const approved=await request('/api/jobs/'+job.data.job_id+'/approve','POST',{});
   assert.equal(approved.status,200,JSON.stringify(approved.data));
   const spendBlock=await request('/api/jobs/'+job.data.job_id+'/dispatch','POST',{});
