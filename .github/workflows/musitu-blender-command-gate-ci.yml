@@ -58,6 +58,9 @@ jobs:
             --python studio/execute_job.py -- \
             --job examples/approved_demo.json --outdir "$PWD/proof" \
             2>&1 | tee proof/blender_stdout.log
+          # Blender may return status 0 even when a Python script raises.
+          test -s proof/evidence.json
+          python -c "import json; assert json.load(open('proof/evidence.json'))['result'] == 'PASS'"
       - name: Verify exact artifact hashes, geometry and animation metadata
         shell: bash
         run: |
