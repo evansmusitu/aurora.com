@@ -132,7 +132,15 @@ async function api(req,env,url){
     try{
       const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','x-studio-control-key':env.STUDIO_MODAL_CONTROL_KEY},body:JSON.stringify({job_id:id,scene_json:row.payload_json,input_sha256:row.payload_sha256,device:row.render_device}),signal:AbortSignal.timeout(20000)});
       if(!response.ok)throw Error('MODAL_REJECTED_'+response.status);
-      await statement(env.STUDIO_DB,"UPDATE jobs SET state='RUNNING' WHERE id=? AND state='DISPATCHING'",id).run();
+      const ack=await statement(env.STUDIO_DB,"UPDATE jobs SET state='RUNNING' WHERE id=? AND state='DISPATCHING'",id).run();
+      if(ack.meta?.changes!==1){
+        const latest=await statement(env.STUDIO_DB,'SELECT * FROM jobs WHERE id=?',id).first();
+        if(latest?.state==='COMPLETED'||latest?.state==='FAILED'){
+          await event(env,id,'ACK_AFTER_CALLBACK',{terminal_state:latest.state});
+          return json({ok:true,state:latest.state,job_id:id},202);
+        }
+        throw new Error('DISPATCH_STATE_CONFLICT');
+      }
       await event(env,id,'DISPATCH_ACCEPTED',{device:row.render_device});
       return json({ok:true,state:'RUNNING',job_id:id},202);
     }catch(e){

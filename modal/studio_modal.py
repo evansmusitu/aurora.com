@@ -113,7 +113,12 @@ def submit_asgi():
             verify_request(jid,scene_json,sha,device)
         except (KeyError,ValueError,TypeError) as exc:
             raise HTTPException(400,"INVALID_SUBMISSION") from exc
+        if device == "GPU" and os.getenv("STUDIO_GPU_GATE_ON_MODAL") != "1":
+            raise HTTPException(status_code=503, detail="GPU_GATE_CLOSED")
         fn=render_gpu if device=="GPU" else render_cpu
-        fn.spawn(jid,scene_json,sha)
+        try:
+            await fn.spawn.aio(jid,scene_json,sha)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="MODAL_DISPATCH_UNAVAILABLE") from exc
         return {"ok":True,"accepted":True,"job_id":jid}
     return app
