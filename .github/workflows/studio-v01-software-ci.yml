@@ -1,0 +1,76 @@
+name: MUSITU Studio v0.1 Software & Blender Integration Proof
+on:
+  push:
+    branches: [experiments/studio-v0-1-20261017]
+    paths:
+      - 'studio/**'
+      - 'tests/**'
+      - 'static/**'
+      - 'examples/**'
+      - 'requirements*.txt'
+      - '.github/workflows/studio-v01-software-ci.yml'
+permissions:
+  contents: read
+jobs:
+  verify-software-and-blender:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bounded test dependencies
+        run: python3 -m pip install --break-system-packages -r requirements-dev.txt
+      - name: Syntax, security contract and persistent queue tests
+        run: |
+          python3 -m compileall -q studio tests
+          python3 -W error::ResourceWarning -m unittest discover -v -s tests
+          node --check static/app.js
+      - name: Verify exact official Blender archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=blender-4.5.14-linux-x64.tar.xz
+          curl --fail --location --retry 3 --max-time 180 -o "$file" "https://download.blender.org/release/Blender4.5/$file"
+          echo '9ba871ff2ecd36526b77432745980b7e6664ecd0c7ca11c48849073dcfe06da3  blender-4.5.14-linux-x64.tar.xz' | sha256sum --check -
+          tar -xJf "$file"
+          ./blender-4.5.14-linux-x64/blender --version | head -5
+      - name: Development-only API-to-Blender integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This is one software integration proof, not public/commercial rendering.
+          python3 - <<'PY'
+          import json, pathlib
+          from studio.store import StudioStore
+          s=StudioStore('ci-data')
+          p=s.create_project('Offline software integration')
+          demo=json.load(open('examples/approved_demo.json'))
+          demo.pop('job_id',None)
+          j=s.create_job(p['id'],demo)
+          s.approve(j['id'])
+          print('TEST_JOB',j['id'])
+          PY
+          python3 -m studio.queue_worker --data ci-data --blender "$PWD/blender-4.5.14-linux-x64/blender" --dev-ci-proof --once
+          python3 - <<'PY'
+          from pathlib import Path
+          from studio.store import StudioStore
+          from studio.verify_job import verify
+          s=StudioStore('ci-data')
+          jobs=s.jobs()
+          assert len(jobs)==1 and jobs[0]['state']=='VERIFIED',jobs
+          job=jobs[0]
+          result=verify(job['input_path'],s.root/'runs'/job['id']/'artifacts')
+          print('MUSITU_V01_REAL_BLENDER_VERIFIED',result)
+          PY
+          mkdir -p proof
+          cp ci-data/studio.sqlite3 proof/
+          cp ci-data/runs/*/artifacts/{scene.blend,scene.glb,preview.png,evidence.json,verification.json} proof/
+          cp ci-data/runs/*/worker_receipt.json proof/
+          sha256sum proof/* > proof/SHA256SUMS.txt
+      - name: Retain bounded software-proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musitu-studio-v01-real-blender-software-proof
+          path: proof/
+          if-no-files-found: warn
+          retention-days: 7

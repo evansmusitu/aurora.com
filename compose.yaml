@@ -1,0 +1,44 @@
+# Development/private-host profile. NOT enterprise-certified production hosting.
+# REQUIRED: prepare .env (real admin token), mkdir -m 700 studio-data, and
+# inspect reverse proxy / host policy. Defaults expose localhost only.
+name: musitu-studio
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Containerfile.api
+    read_only: true
+    user: "${PUID:-1000}:${PGID:-1000}"
+    env_file: .env
+    environment:
+      MUSITU_STUDIO_DATA: /data
+    volumes:
+      - ./studio-data:/data:rw
+    ports:
+      - "127.0.0.1:8755:8755"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+  cpu-worker:
+    build:
+      context: .
+      dockerfile: Containerfile.worker
+    read_only: true
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      MUSITU_STUDIO_DATA: /data
+      MUSITU_WORKER_ISOLATED: '1'
+    volumes:
+      - ./studio-data:/data:rw
+    network_mode: none
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 4g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:size=67108864,noexec,nosuid,nodev
+    restart: unless-stopped

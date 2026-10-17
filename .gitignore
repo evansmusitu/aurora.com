@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+studio-data/
+.env
+*.blend1
+*.log
+local-backups/
