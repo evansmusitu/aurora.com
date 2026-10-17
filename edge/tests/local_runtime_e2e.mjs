@@ -55,6 +55,23 @@ if(mode==='stage'){
   assert.equal(denied.status,401);
   const wrongHash=await request('/internal/callback','POST',{...cb,input_sha256:'0'.repeat(64)},callback);
   assert.equal(wrongHash.status,409);
+  // SHA-256 alone cannot detect a structurally malformed file whose hash
+  // was recomputed; reject both invalid PNG IHDR and GLB2 declared length.
+  for(const invalidName of ['preview.png','scene.glb']){
+    const damaged=files.map(f=>({...f}));
+    const item=damaged.find(f=>f.name===invalidName);
+    const bytes=Buffer.from(item.data_base64,'base64');
+    if(invalidName==='preview.png')bytes.writeUInt32BE(201,20);
+    else bytes.writeUInt32LE(bytes.byteLength+4,8);
+    item.data_base64=bytes.toString('base64');
+    item.sha256=digest(bytes);
+    const corrupted=await request('/internal/callback','POST',
+      {...cb,files:damaged},callback);
+    assert.equal(corrupted.status,409,'Corrupted '+invalidName+' must fail despite valid hash');
+    assert.equal(corrupted.data.error,'INVALID_ARTIFACT_FORMAT');
+    const stillRunning=await request('/api/jobs/'+id);
+    assert.equal(stillRunning.data.job.state,'RUNNING');
+  }
   const success=await request('/internal/callback','POST',cb,callback);
   assert.equal(success.status,200,JSON.stringify(success.data));
   assert.equal(success.data.state,'COMPLETED');
