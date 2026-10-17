@@ -1,0 +1,64 @@
+name: MUSITU Studio Asset Export Integration Test
+
+on:
+  push:
+    branches:
+      - experiments/studio-assets-20261017
+    paths:
+      - studio/tests/studio_asset_pipeline.py
+      - studio/tests/verify_studio.py
+      - .github/workflows/studio-asset-pipeline-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  studio-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout the isolated studio test branch
+        uses: actions/checkout@v4
+
+      - name: Verify test scripts compile
+        run: |
+          python -m py_compile studio/tests/studio_asset_pipeline.py studio/tests/verify_studio.py
+
+      - name: Acquire official Blender 4.5.14 with published checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ${RUNNER_TEMP}
+          base='https://download.blender.org/release/Blender4.5'
+          name='blender-4.5.14-linux-x64.tar.xz'
+          curl --fail --location --retry 3 --connect-timeout 20 -o blender.sha256 "$base/blender-4.5.14.sha256"
+          curl --fail --location --retry 3 --connect-timeout 20 -o "$name" "$base/$name"
+          grep -F "$name" blender.sha256
+          sha256sum --ignore-missing --check blender.sha256
+          tar -xJf "$name"
+          ./blender-4.5.14-linux-x64/blender --version | head -5
+
+      - name: Build and export three demonstration asset classes using genuine Blender
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p studio_proof
+          "${RUNNER_TEMP}/blender-4.5.14-linux-x64/blender" --background --factory-startup --threads 2 \
+            --python studio/tests/studio_asset_pipeline.py -- --outdir "$PWD/studio_proof" \
+            2>&1 | tee studio_proof/studio_execution.log
+
+      - name: Validate native scene, GLB animation, and PNG
+        shell: bash
+        run: |
+          set -euo pipefail
+          python studio/tests/verify_studio.py studio_proof
+          (cd studio_proof && sha256sum MUSITU_Studio_Prototype.blend MUSITU_Studio_Animated_Assets.glb MUSITU_Studio_Preview.png studio_evidence.json verification_summary.json > SHA256SUMS.txt)
+
+      - name: Publish bounded CI test artifact for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musitu-studio-asset-integration-proof
+          path: studio_proof/
+          if-no-files-found: warn
+          retention-days: 7
