@@ -1,0 +1,90 @@
+name: MUSITU Studio v0.5 Local Cloudflare D1 R2 Blender E2E
+on:
+  push:
+    branches:
+      - experiments/studio-cloudflare-local-e2e-20261017
+    paths:
+      - 'edge/**'
+      - 'studio/**'
+      - 'examples/approved_demo.json'
+      - '.github/workflows/studio-v05-cloudflare-local-e2e.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: musitu-local-e2e-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  worker-d1-r2-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static API and Blender validator tests
+        run: |
+          set -euo pipefail
+          cd edge && node --test tests/api.test.mjs tests/validation.test.mjs
+          python -m compileall -q ../studio
+      - name: Install LOCAL Wrangler emulator and generate disposable binding config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd edge
+          npm install --no-fund --no-audit
+          node - <<'JS'
+          const fs=require('node:fs');
+          const conf=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          if(conf.vars.ENABLE_RENDER_DISPATCH!=='false'||conf.vars.GPU_EXECUTION_APPROVED!=='false'){
+            throw Error('LIVE_RENDER_SPENDING_GUARDS_NOT_CLOSED');
+          }
+          conf.d1_databases[0].database_id='00000000-0000-0000-0000-000000000001';
+          fs.writeFileSync('wrangler.local.ci.json',JSON.stringify(conf,null,2));
+          fs.writeFileSync('.dev.vars','STUDIO_ADMIN_TOKEN='+'A'.repeat(48)+'\nSTUDIO_MODAL_CALLBACK_KEY='+'B'.repeat(48)+'\n');
+          console.log('LOCAL_EMULATOR_NO_CLOUDFLARE_CREDENTIALS');
+          JS
+          npx wrangler d1 migrations apply musitu-studio-v02 --local --config wrangler.local.ci.json --persist-to .wrangler/state
+      - name: Download fixed-hash official Blender for software QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=blender-4.5.14-linux-x64.tar.xz
+          curl -fLsS --retry 2 --max-time 160 -o "$f" "https://download.blender.org/release/Blender4.5/$f"
+          echo '9ba871ff2ecd36526b77432745980b7e6664ecd0c7ca11c48849073dcfe06da3  blender-4.5.14-linux-x64.tar.xz' | sha256sum -c -
+          tar -xJf "$f"
+          mkdir -p proof-v02
+          STUDIO_RENDER_DEVICE=CPU ./blender-4.5.14-linux-x64/blender -b --factory-startup --threads 2 --python studio/execute_job.py -- --job examples/approved_demo.json --outdir "$PWD/proof-v02" >proof-v02/blender_stdout.log 2>&1
+          python studio/verify_job.py examples/approved_demo.json proof-v02
+      - name: Test real local Cloudflare D1 R2, manual Modal state simulation only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd edge
+          npx wrangler dev --local --config wrangler.local.ci.json --persist-to .wrangler/state --ip 127.0.0.1 --port 8787 >wrangler-local.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 45); do
+            if curl -sS -f --max-time 1 http://127.0.0.1:8787/ > /dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -sS -f http://127.0.0.1:8787/ >/dev/null
+          node tests/local_runtime_e2e.mjs stage
+          job_id="$(cat local-job-id.txt)"
+          [[ "$job_id" =~ ^[0-9a-f-]{36}$ ]]
+          npx wrangler d1 execute musitu-studio-v02 --local --config wrangler.local.ci.json --persist-to .wrangler/state --command "UPDATE jobs SET state='RUNNING' WHERE id='$job_id' AND state='APPROVED';"
+          node tests/local_runtime_e2e.mjs complete ../proof-v02
+          echo 'STUDIO_LOCAL_D1_R2_VERIFIED_NO_PROVIDER_DEPLOYMENT'
+      - name: Archive only development proof, no secrets or local D1
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musitu-studio-local-cloudflare-d1-r2-real-blender-proof
+          path: |
+            proof-v02/scene.blend
+            proof-v02/scene.glb
+            proof-v02/preview.png
+            proof-v02/evidence.json
+            proof-v02/verification.json
+          if-no-files-found: warn
+          retention-days: 7
