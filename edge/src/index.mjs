@@ -1,4 +1,4 @@
-import {validateScene,sha256,equalSecret,assetType} from './validation.mjs';
+import {validateScene,sha256,equalSecret,assetType,validArtifactHeader} from './validation.mjs';
 const DEFAULT_HEADERS={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','x-frame-options':'DENY','referrer-policy':'no-referrer'};
 const json=(obj,status=200)=>new Response(JSON.stringify(obj),{status,headers:DEFAULT_HEADERS});
 const err=(code,status=400)=>json({ok:false,error:code},status);
@@ -35,7 +35,8 @@ async function callback(req,env){
   if(!row||!['DISPATCHING','RUNNING'].includes(row.state))return err('JOB_NOT_ACTIVE',409);
   if(b.input_sha256!==row.payload_sha256)return err('JOB_INPUT_HASH_MISMATCH',409);
   if(b.state==='FAILED'){
-    await statement(env.STUDIO_DB,"UPDATE jobs SET state='FAILED',error=?,finished_at=? WHERE id=? AND state IN ('DISPATCHING','RUNNING')",String(b.error||'RENDER_FAILED').slice(0,200),now(),row.id).run();
+    const outcome=await statement(env.STUDIO_DB,"UPDATE jobs SET state='FAILED',error=?,finished_at=? WHERE id=? AND state IN ('DISPATCHING','RUNNING')",String(b.error||'RENDER_FAILED').slice(0,200),now(),row.id).run();
+    if(outcome.meta?.changes!==1)return err('CONCURRENT_STATE_CHANGE',409);
     await event(env,row.id,'RENDER_FAILED');
     return json({ok:true,state:'FAILED'});
   }
@@ -49,9 +50,7 @@ async function callback(req,env){
     let bytes;try{bytes=Uint8Array.from(atob(f.data_base64),c=>c.charCodeAt(0));}catch{return err('INVALID_BASE64');}
     total+=bytes.length;
     if(bytes.length<1024||total>5000000||(await sha256(bytes))!==f.sha256)return err('INVALID_ARTIFACT_HASH',409);
-    if(f.name==='scene.blend'&&new TextDecoder().decode(bytes.slice(0,7))!=='BLENDER')return err('INVALID_BLEND');
-    if(f.name==='scene.glb'&&new TextDecoder().decode(bytes.slice(0,4))!=='glTF')return err('INVALID_GLB');
-    if(f.name==='preview.png'&&!(bytes[0]===137&&bytes[1]===80&&bytes[2]===78&&bytes[3]===71))return err('INVALID_PNG');
+    if(!validArtifactHeader(f.name,bytes))return err('INVALID_ARTIFACT_FORMAT',409);
     decoded.push({name:f.name,bytes,sha256:f.sha256});
   }
   if(expected.size)return err('MISSING_ARTIFACT');
